@@ -43,7 +43,7 @@ ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 app = FastAPI(
-    title="Vehicle Speed Detection and ANPR",
+    title="JNRD PRO",
     description=(
         "Detect and track vehicles, estimate speed between calibrated video "
         "lines, recognize visible plate text, and create human-review cases for "

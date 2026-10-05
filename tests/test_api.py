@@ -22,9 +22,17 @@ def test_homepage_serves_the_browser_app() -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Vehicle Speed &amp; ANPR" in response.text
+    assert "<title>JNRD PRO</title>" in response.text
+    assert "<h1>JNRD PRO</h1>" in response.text
     assert 'fetch("/api/v1/analyze"' in response.text
     assert "getUserMedia" in response.text
+
+
+def test_openapi_uses_the_product_name() -> None:
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    assert response.json()["info"]["title"] == "JNRD PRO"
 
 
 def test_live_websocket_rejects_invalid_calibration() -> None:

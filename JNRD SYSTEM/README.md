@@ -1,4 +1,4 @@
-# Intelligent Speed Enforcement Demo
+# JNRD PRO - Intelligent Speed Enforcement Demo
 
 A prototype that follows the requested flow: **detect speed → capture vehicle → read plate → create a review case**. It uses a FastAPI web application, YOLOv8 vehicle tracking, EasyOCR text recognition, optional Firebase Firestore persistence, and a simulated-by-default SMS workflow.
 

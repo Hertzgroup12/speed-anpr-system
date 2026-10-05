@@ -68,8 +68,16 @@ def test_simulated_notice_requires_review_and_is_not_repeatable() -> None:
         notify_driver(case_id, settings)
 
 
-def test_simulated_notice_requires_a_driver_lookup() -> None:
-    settings = Settings(speed_limit_kmh=50, sms_simulation=True)
+def test_simulated_notice_requires_a_driver_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DRIVER_DIRECTORY", raising=False)
+    settings = Settings(
+        speed_limit_kmh=50,
+        sms_simulation=True,
+        driver_directory={},
+        _env_file=None,
+    )
     cases = create_offenses(
         [make_event(61)],
         "test.mp4",
