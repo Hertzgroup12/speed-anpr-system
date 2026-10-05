@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,15 @@ class Settings(BaseSettings):
     firebase_project_id: str | None = None
     firebase_credentials: str | None = None
     firebase_collection: str = "speed_events"
+    offense_collection: str = "speed_offenses"
+    speed_limit_kmh: float = Field(default=50.0, gt=0)
+    camera_location: str = "Demo camera"
+    capture_directory: str = "data/captures"
+    sms_simulation: bool = True
+    driver_directory: dict[str, str] = Field(default_factory=dict)
+    africastalking_username: str | None = None
+    africastalking_api_key: str | None = None
+    africastalking_sender_id: str | None = None
 
 
 @lru_cache

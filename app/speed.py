@@ -3,7 +3,10 @@
 
 def crossed_line(previous_y: float, current_y: float, line_y: float) -> bool:
     """Return true when a tracked point moves across a horizontal image line."""
-    return (previous_y < line_y <= current_y) or (current_y <= line_y < previous_y)
+    return previous_y != current_y and min(previous_y, current_y) <= line_y <= max(
+        previous_y,
+        current_y,
+    )
 
 
 def estimate_speed_kmh(distance_m: float, elapsed_seconds: float) -> float:

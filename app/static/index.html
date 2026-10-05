@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a43">
+  <title>Vehicle Speed &amp; ANPR</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      color: #172b4d;
+      background: #f3f6fa;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    * { box-sizing: border-box; }
+
+    body { margin: 0; min-width: 320px; }
+
+    header {
+      padding: 28px max(24px, calc((100% - 1080px) / 2));
+      color: white;
+      background: #102a43;
+    }
+
+    header h1 { margin: 0 0 8px; font-size: clamp(1.5rem, 4vw, 2rem); }
+    header p { margin: 0; color: #d9e2ec; line-height: 1.5; }
+
+    main {
+      width: min(100% - 32px, 1080px);
+      margin: 28px auto 56px;
+    }
+
+    .panel {
+      margin-bottom: 20px;
+      padding: clamp(18px, 4vw, 28px);
+      border: 1px solid #d9e2ec;
+      border-radius: 14px;
+      background: white;
+      box-shadow: 0 3px 12px rgb(16 42 67 / 5%);
+    }
+
+    h2 { margin: 0 0 8px; font-size: 1.25rem; }
+    .hint { margin: 0 0 20px; color: #52667a; line-height: 1.55; }
+
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    label { display: grid; gap: 7px; font-size: .94rem; font-weight: 600; }
+
+    input[type="number"],
+    input[type="file"] {
+      width: 100%;
+      min-height: 44px;
+      padding: 9px 11px;
+      border: 1px solid #9fb3c8;
+      border-radius: 7px;
+      background: white;
+      color: inherit;
+      font: inherit;
+    }
+
+    input:focus-visible, button:focus-visible, a:focus-visible {
+      outline: 3px solid #62b0e8;
+      outline-offset: 2px;
+    }
+
+    .file-field { margin-bottom: 18px; }
+    .file-help { margin: -10px 0 20px; color: #52667a; font-size: .88rem; }
+
+    button {
+      min-height: 46px;
+      padding: 10px 20px;
+      border: 0;
+      border-radius: 7px;
+      color: white;
+      background: #1769aa;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:hover:not(:disabled) { background: #0f5794; }
+    button:disabled { cursor: wait; opacity: .7; }
+
+    .status {
+      margin: 18px 0 0;
+      padding: 12px 14px;
+      border-radius: 7px;
+      background: #f0f4f8;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .status[hidden] { display: none; }
+    .status.error { color: #8a1c1c; background: #fff0f0; }
+    .status.success { color: #135c36; background: #eaf8ef; }
+    .summary { margin: 12px 0 18px; color: #334e68; line-height: 1.6; }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th, td { padding: 12px 10px; border-bottom: 1px solid #e5eaf0; }
+    th { color: #334e68; font-size: .88rem; }
+    td { overflow-wrap: anywhere; }
+    .empty-row { color: #52667a; text-align: center; }
+    .case-photo { width: 110px; height: 72px; border-radius: 5px; object-fit: cover; }
+    .case-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .case-actions button { min-height: 36px; padding: 7px 11px; font-size: .88rem; }
+    .case-actions .dismiss { color: #7b271c; background: #fbe9e7; }
+    .case-actions .dismiss:hover:not(:disabled) { background: #f6d1cc; }
+    .live-preview {
+      position: relative;
+      overflow: hidden;
+      border-radius: 9px;
+      background: #102a43;
+    }
+    .live-preview video { display: block; width: 100%; max-height: 480px; object-fit: contain; }
+    .live-preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .camera-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 18px 0; }
+    .camera-actions label { flex: 1 1 260px; }
+    .camera-actions select {
+      width: 100%;
+      min-height: 44px;
+      padding: 9px 11px;
+      border: 1px solid #9fb3c8;
+      border-radius: 7px;
+      background: white;
+      font: inherit;
+    }
+    button.stop { background: #a52a2a; }
+    button.stop:hover:not(:disabled) { background: #872020; }
+
+    footer { padding: 0 16px 28px; color: #52667a; text-align: center; font-size: .9rem; }
+    footer a { color: #1769aa; }
+
+    @media (max-width: 680px) {
+      header { padding: 24px 20px; }
+      .fields { grid-template-columns: 1fr; }
+      th, td { padding: 10px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1> JNRD Vehicle Speed &amp; ANPR</h1>
+    <p>Upload a traffic video to detect vehicles, estimate their speed, and read visible number plates.</p>
+  </header>
+
+  <main>
+    <section class="panel" aria-labelledby="upload-heading">
+      <h2 id="upload-heading">Analyze a video</h2>
+      <p id="system-settings" class="summary" role="status">Loading system settings…</p>
+      <p class="hint">
+        Enter the real distance between the two measurement lines. Line positions are fractions
+        of the video height (for example, 0.35 means 35% from the top).
+      </p>
+
+      <form id="analyze-form">
+        <label class="file-field" for="video">
+          Traffic video
+          <input
+            id="video"
+            name="video"
+            type="file"
+            accept=".mp4,.avi,.mov,.mkv,.webm,video/*"
+            required
+          >
+        </label>
+        <p class="file-help">Supported formats: MP4, AVI, MOV, MKV, and WEBM.</p>
+
+        <div class="fields">
+          <label for="distance">Distance between lines (meters)
+            <input id="distance" name="distance_m" type="number" min="0.01" step="any" value="10" required>
+          </label>
+          <label for="location">Camera location
+            <input id="location" name="location" type="text" maxlength="150" value="Demo camera" required>
+          </label>
+          <label for="line-a">First line position (0–1)
+            <input id="line-a" name="line_a_ratio" type="number" min="0.001" max="0.999" step="any" value="0.35" required>
+          </label>
+          <label for="line-b">Second line position (0–1)
+            <input id="line-b" name="line_b_ratio" type="number" min="0.001" max="0.999" step="any" value="0.65" required>
+          </label>
+        </div>
+
+        <button id="submit-button" type="submit">Analyze video</button>
+        <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="live-heading">
+      <h2 id="live-heading">Live laptop camera</h2>
+      <p class="hint">
+        Allow camera access in your browser. The browser sends sampled frames to this server;
+        live analysis and speed measurement use the same distance and line settings above.
+        Keep the camera fixed and validate its calibration before interpreting speed readings.
+      </p>
+      <div class="camera-actions">
+        <label for="camera-device">Camera device
+          <select id="camera-device">
+            <option value="">Default camera</option>
+          </select>
+        </label>
+        <button id="start-camera" type="button">Start live camera</button>
+        <button id="stop-camera" class="stop" type="button" disabled>Stop camera</button>
+      </div>
+      <div class="live-preview">
+        <video id="live-video" autoplay playsinline muted aria-label="Live camera preview"></video>
+        <canvas id="line-overlay" aria-hidden="true"></canvas>
+      </div>
+      <p id="camera-status" class="status" role="status" aria-live="polite">
+        Camera is stopped. The browser will ask permission when you start it.
+      </p>
+    </section>
+
+    <section class="panel" aria-labelledby="results-heading">
+      <h2 id="results-heading">Detection results</h2>
+      <p id="summary" class="summary">Upload a video to see its analysis results here.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Track</th>
+              <th scope="col">Plate</th>
+              <th scope="col">Speed</th>
+              <th scope="col">Direction</th>
+              <th scope="col">Time</th>
+            </tr>
+          </thead>
+          <tbody id="events">
+            <tr><td class="empty-row" colspan="5">No results yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="offenses-heading">
+      <h2 id="offenses-heading">Speed cases — operator review</h2>
+      <p class="hint">
+        Speeds above the configured limit are estimates, not legal findings.
+        Review each case before taking any follow-up action. Driver SMS is simulated by default.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Vehicle</th>
+              <th scope="col">Plate</th>
+              <th scope="col">Estimated speed</th>
+              <th scope="col">Location / time</th>
+              <th scope="col">Review</th>
+              <th scope="col">Follow-up</th>
+            </tr>
+          </thead>
+          <tbody id="offenses">
+            <tr><td class="empty-row" colspan="6">Loading cases…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Speed readings are estimates and require accurate camera calibration.
+    <a href="/docs">API documentation</a>
+  </footer>
+
+  <script>
+    const form = document.querySelector("#analyze-form");
+    const button = document.querySelector("#submit-button");
+    const statusMessage = document.querySelector("#status");
+    const summary = document.querySelector("#summary");
+    const systemSettings = document.querySelector("#system-settings");
+    const eventsBody = document.querySelector("#events");
+    const offensesBody = document.querySelector("#offenses");
+    const allowedExtensions = new Set([".mp4", ".avi", ".mov", ".mkv", ".webm"]);
+    const cameraDevice = document.querySelector("#camera-device");
+    const cameraStatus = document.querySelector("#camera-status");
+    const liveVideo = document.querySelector("#live-video");
+    const lineOverlay = document.querySelector("#line-overlay");
+    const startCameraButton = document.querySelector("#start-camera");
+    const stopCameraButton = document.querySelector("#stop-camera");
+    let cameraStream = null;
+    let cameraSocket = null;
+    let cameraRunning = false;
+    let resolveCameraFrame = null;
+
+    function showStatus(message, kind) {
+      statusMessage.textContent = message;
+      statusMessage.className = `status ${kind}`;
+      statusMessage.hidden = false;
+    }
+
+    function showCameraStatus(message, kind = "") {
+      cameraStatus.textContent = message;
+      cameraStatus.className = `status ${kind}`;
+    }
+
+    function drawMeasurementLines() {
+      const width = liveVideo.videoWidth || 640;
+      const height = liveVideo.videoHeight || 480;
+      lineOverlay.width = width;
+      lineOverlay.height = height;
+      const context = lineOverlay.getContext("2d");
+      context.clearRect(0, 0, width, height);
+      const lineValues = [
+        [Number(form.elements.line_a_ratio.value), "Line A"],
+        [Number(form.elements.line_b_ratio.value), "Line B"],
+      ];
+      lineValues.forEach(([ratio, label], index) => {
+        const y = Number(ratio) * height;
+        context.strokeStyle = index === 0 ? "#25d0a5" : "#ffd166";
+        context.fillStyle = context.strokeStyle;
+        context.lineWidth = Math.max(2, height / 240);
+        context.font = `${Math.max(14, height / 32)}px sans-serif`;
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+        context.stroke();
+        context.fillText(label, 12, Math.max(20, y - 8));
+      });
+    }
+
+    async function refreshCameraDevices() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Camera access requires localhost or a secure HTTPS site.");
+      }
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      permissionStream.getTracks().forEach((track) => track.stop());
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter((device) => device.kind === "videoinput");
+      const selected = cameraDevice.value;
+      cameraDevice.replaceChildren();
+      cameras.forEach((camera, index) => {
+        const option = document.createElement("option");
+        option.value = camera.deviceId;
+        option.textContent = camera.label || `Camera ${index + 1}`;
+        cameraDevice.append(option);
+      });
+      if (cameras.some((camera) => camera.deviceId === selected)) {
+        cameraDevice.value = selected;
+      }
+    }
+
+    async function sendCameraFrames() {
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      while (
+        cameraRunning &&
+        cameraSocket &&
+        cameraSocket.readyState === WebSocket.OPEN
+      ) {
+        if (liveVideo.videoWidth && liveVideo.videoHeight) {
+          const scale = Math.min(1, 640 / liveVideo.videoWidth);
+          canvas.width = Math.round(liveVideo.videoWidth * scale);
+          canvas.height = Math.round(liveVideo.videoHeight * scale);
+          context.drawImage(liveVideo, 0, 0, canvas.width, canvas.height);
+          const jpeg = await new Promise((resolve) =>
+            canvas.toBlob(resolve, "image/jpeg", 0.65),
+          );
+          if (jpeg && cameraRunning && cameraSocket.readyState === WebSocket.OPEN) {
+            // Wait for inference to finish before sending another frame; this avoids a stale-frame queue.
+            const frameProcessed = new Promise((resolve) => {
+              resolveCameraFrame = resolve;
+              window.setTimeout(() => {
+                if (resolveCameraFrame === resolve) {
+                  resolveCameraFrame = null;
+                  resolve(false);
+                }
+              }, 15000);
+            });
+            cameraSocket.send(await jpeg.arrayBuffer());
+            if (!(await frameProcessed) && cameraRunning) {
+              throw new Error("Live analysis did not respond to a camera frame.");
+            }
+          }
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+      }
+    }
+
+    function stopLiveCamera(message = "Camera stopped.") {
+      cameraRunning = false;
+      if (resolveCameraFrame) {
+        resolveCameraFrame(true);
+        resolveCameraFrame = null;
+      }
+      if (cameraSocket) {
+        if (cameraSocket.readyState === WebSocket.OPEN) cameraSocket.send("stop");
+        cameraSocket.close();
+        cameraSocket = null;
+      }
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+        cameraStream = null;
+      }
+      liveVideo.srcObject = null;
+      startCameraButton.disabled = false;
+      stopCameraButton.disabled = true;
+      lineOverlay.getContext("2d").clearRect(0, 0, lineOverlay.width, lineOverlay.height);
+      showCameraStatus(message);
+    }
+
+    async function startLiveCamera() {
+      startCameraButton.disabled = true;
+      showCameraStatus("Requesting camera permission…");
+      try {
+        await refreshCameraDevices();
+        const deviceId = cameraDevice.value;
+        const videoConstraints = deviceId
+          ? { deviceId: { exact: deviceId }, width: { ideal: 640 }, frameRate: { ideal: 5, max: 10 } }
+          : { width: { ideal: 640 }, frameRate: { ideal: 5, max: 10 } };
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+        liveVideo.srcObject = cameraStream;
+        await liveVideo.play();
+        drawMeasurementLines();
+
+        const socketScheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+        cameraSocket = new WebSocket(`${socketScheme}//${window.location.host}/api/v1/live`);
+        cameraSocket.binaryType = "arraybuffer";
+        cameraSocket.onmessage = async (message) => {
+          const update = JSON.parse(message.data);
+          if (resolveCameraFrame && update.type !== "ready") {
+            resolveCameraFrame(true);
+            resolveCameraFrame = null;
+          }
+          if (update.type === "ready") {
+            showCameraStatus(
+              `Live monitoring · ${update.location} · speed review threshold ${update.speed_limit_kmh} km/h.`,
+              "success",
+            );
+            return;
+          }
+          if (update.type === "frame_processed") {
+            if (update.frames_processed % 25 === 0) {
+              showCameraStatus(`Live monitoring · ${update.frames_processed} frames analyzed.`);
+            }
+            return;
+          }
+          if (update.type === "error") {
+            showCameraStatus(`Camera analysis error: ${update.detail}`, "error");
+            return;
+          }
+          if (update.type === "events") {
+            const existingRows = [...eventsBody.querySelectorAll("tr")].filter(
+              (row) => !row.querySelector(".empty-row"),
+            );
+            const combinedEvents = existingRows.map((row) => ({
+              track_id: row.cells[0].textContent,
+              plate_number: row.cells[1].textContent,
+              speed_kmh: Number.parseFloat(row.cells[2].textContent),
+              direction: row.cells[3].textContent,
+              timestamp_seconds: Number.parseFloat(row.cells[4].textContent),
+            }));
+            showEvents([...combinedEvents, ...update.events].slice(-30));
+            showStatus(
+              `Live camera detected ${update.events.length} vehicle event(s); ` +
+              `${update.offenses_created} case(s) flagged for review.`,
+              "success",
+            );
+            await refreshOffenses();
+          }
+        };
+        cameraSocket.onerror = () => {
+          showCameraStatus("Could not connect to live analysis. Check that the API is running.", "error");
+        };
+        cameraSocket.onclose = () => {
+          if (cameraRunning) stopLiveCamera("Live connection closed.");
+        };
+        await new Promise((resolve, reject) => {
+          cameraSocket.addEventListener("open", () => {
+            cameraSocket.send(JSON.stringify({
+              distance_m: Number(form.elements.distance_m.value),
+              line_a_ratio: Number(form.elements.line_a_ratio.value),
+              line_b_ratio: Number(form.elements.line_b_ratio.value),
+              location: form.elements.location.value.trim(),
+            }));
+          }, { once: true });
+          cameraSocket.addEventListener("message", (event) => {
+            const update = JSON.parse(event.data);
+            if (update.type === "ready") {
+              resolve();
+            } else if (update.type === "error") {
+              reject(new Error(update.detail));
+            }
+          }, { once: true });
+          cameraSocket.addEventListener(
+            "close",
+            () => reject(new Error("Live camera connection closed before starting.")),
+            { once: true },
+          );
+        });
+        cameraRunning = true;
+        stopCameraButton.disabled = false;
+        sendCameraFrames().catch((error) => {
+          showCameraStatus(`Could not send camera frames: ${error.message}`, "error");
+          stopLiveCamera();
+        });
+      } catch (error) {
+        stopLiveCamera(`Could not start live camera: ${error.message}`);
+      }
+    }
+
+    function showEvents(events) {
+      // Build table cells with textContent so OCR text is displayed as data, never HTML.
+      eventsBody.replaceChildren();
+      if (events.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 5;
+        cell.className = "empty-row";
+        cell.textContent = "No vehicles crossed both measurement lines.";
+        row.append(cell);
+        eventsBody.append(row);
+        return;
+      }
+
+      for (const event of events) {
+        const row = document.createElement("tr");
+        const values = [
+          event.track_id,
+          event.plate_number || "Not recognized",
+          `${Number(event.speed_kmh).toFixed(2)} km/h`,
+          event.direction,
+          `${Number(event.timestamp_seconds).toFixed(2)} s`,
+        ];
+        for (const value of values) {
+          const cell = document.createElement("td");
+          cell.textContent = String(value);
+          row.append(cell);
+        }
+        eventsBody.append(row);
+      }
+    }
+
+    async function loadSystemSettings() {
+      const response = await fetch("/api/v1/config");
+      const settings = await response.json();
+      if (!response.ok) throw new Error(settings.detail || "Could not load settings.");
+      systemSettings.textContent =
+        `Review threshold: ${settings.speed_limit_kmh} km/h · ` +
+        `Camera: ${settings.camera_location} · ` +
+        `SMS: ${settings.sms_simulation ? "simulation only" : "live sending enabled"} · ` +
+        `Firestore: ${settings.firebase_enabled ? "enabled" : "in-memory demo"}`;
+    }
+
+    async function refreshOffenses() {
+      const response = await fetch("/api/v1/offenses");
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Could not load the review cases.");
+      }
+
+      offensesBody.replaceChildren();
+      if (result.offenses.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 6;
+        cell.className = "empty-row";
+        cell.textContent = "No speed cases are waiting for review.";
+        row.append(cell);
+        offensesBody.append(row);
+        return;
+      }
+
+      for (const offense of result.offenses) {
+        const row = document.createElement("tr");
+        const vehicleCell = document.createElement("td");
+        if (offense.vehicle_capture_id) {
+          const image = document.createElement("img");
+          image.className = "case-photo";
+          image.src = `/api/v1/captures/${encodeURIComponent(offense.vehicle_capture_id)}.jpg`;
+          image.alt = "Captured vehicle";
+          vehicleCell.append(image);
+        } else {
+          vehicleCell.textContent = "Image unavailable";
+        }
+        row.append(vehicleCell);
+
+        for (const value of [
+          offense.plate_number || "Not recognized",
+          `${offense.speed_kmh} km/h (limit ${offense.speed_limit_kmh})`,
+          `${offense.location} — ${offense.detected_at}`,
+          `${offense.review_status.replaceAll("_", " ")}${
+            offense.notification_status !== "not_sent"
+              ? `; notice ${offense.notification_status}`
+              : ""
+          }`,
+        ]) {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.append(cell);
+        }
+
+        const actionCell = document.createElement("td");
+        const actions = document.createElement("div");
+        actions.className = "case-actions";
+        if (offense.review_status === "pending_review") {
+          actions.append(
+            makeCaseButton("Mark reviewed", "reviewed", offense.case_id),
+            makeCaseButton("Dismiss", "dismissed", offense.case_id, true),
+          );
+        } else if (
+          offense.review_status === "reviewed" &&
+          !["simulated", "sent"].includes(offense.notification_status)
+        ) {
+          actions.append(makeCaseButton("Send driver notice", "notify", offense.case_id));
+        } else {
+          actions.textContent = "No further action";
+        }
+        actionCell.append(actions);
+        row.append(actionCell);
+        offensesBody.append(row);
+      }
+    }
+
+    function makeCaseButton(label, action, caseId, dismiss = false) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      if (dismiss) button.className = "dismiss";
+      button.addEventListener("click", async () => {
+        if (action === "notify" && !window.confirm(
+          "Send this notice? In simulation mode, no SMS leaves this application.",
+        )) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          const isNotification = action === "notify";
+          const response = await fetch(
+            isNotification
+              ? `/api/v1/offenses/${encodeURIComponent(caseId)}/notify`
+              : `/api/v1/offenses/${encodeURIComponent(caseId)}`,
+            {
+              method: isNotification ? "POST" : "PATCH",
+              headers: isNotification ? {} : { "Content-Type": "application/json" },
+              body: isNotification ? undefined : JSON.stringify({ decision: action }),
+            },
+          );
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail || "Case action failed.");
+          showStatus(
+            isNotification
+              ? `Driver notice status: ${result.notification_status}.`
+              : `Case marked ${action.replaceAll("_", " ")}.`,
+            "success",
+          );
+          await refreshOffenses();
+        } catch (error) {
+          showStatus(`Case action failed: ${error.message}`, "error");
+          button.disabled = false;
+        }
+      });
+      return button;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      statusMessage.hidden = true;
+
+      const video = document.querySelector("#video").files[0];
+      if (!video) {
+        showStatus("Choose a video file before submitting.", "error");
+        return;
+      }
+      const extension = video.name.slice(video.name.lastIndexOf(".")).toLowerCase();
+      if (!allowedExtensions.has(extension)) {
+        showStatus("Choose an MP4, AVI, MOV, MKV, or WEBM video.", "error");
+        return;
+      }
+
+      const distance = Number(form.elements.distance_m.value);
+      const lineA = Number(form.elements.line_a_ratio.value);
+      const lineB = Number(form.elements.line_b_ratio.value);
+      if (!Number.isFinite(distance) || distance <= 0) {
+        showStatus("Distance must be a number greater than zero.", "error");
+        return;
+      }
+      if (![lineA, lineB].every((ratio) => Number.isFinite(ratio) && ratio > 0 && ratio < 1)) {
+        showStatus("Both line positions must be greater than 0 and less than 1.", "error");
+        return;
+      }
+      if (lineA === lineB) {
+        showStatus("The two measurement lines must be at different positions.", "error");
+        return;
+      }
+
+      const request = new FormData();
+      request.append("video", video);
+      request.append("distance_m", String(distance));
+      request.append("line_a_ratio", String(lineA));
+      request.append("line_b_ratio", String(lineB));
+      request.append("location", form.elements.location.value.trim());
+
+      button.disabled = true;
+      button.textContent = "Analyzing…";
+      showStatus("Uploading and analyzing the video. This may take a few minutes.", "");
+      summary.textContent = "";
+      try {
+        // Let the browser set Content-Type so it includes the multipart boundary.
+        const response = await fetch("/api/v1/analyze", {
+          method: "POST",
+          body: request,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          const detail = typeof result.detail === "string"
+            ? result.detail
+            : JSON.stringify(result.detail || result);
+          throw new Error(detail);
+        }
+
+        showEvents(result.events);
+        summary.textContent =
+          `${result.filename}: ${result.frames_processed} frames at ${result.fps} FPS, ` +
+          `${result.duration_seconds} seconds. ${result.events.length} vehicle event(s) found. ` +
+          `${result.offenses_created} case(s) need operator review. ` +
+          `${result.events_persisted} event(s) saved to Firebase.`;
+        await refreshOffenses();
+        showStatus(
+          `${result.offenses_created} speed case(s) flagged for human review.`,
+          "success",
+        );
+      } catch (error) {
+        showStatus(`Analysis failed: ${error.message}`, "error");
+        summary.textContent = "The video could not be analyzed.";
+      } finally {
+        button.disabled = false;
+        button.textContent = "Analyze video";
+      }
+    });
+
+    startCameraButton.addEventListener("click", startLiveCamera);
+    stopCameraButton.addEventListener("click", () => stopLiveCamera());
+
+    refreshOffenses().catch((error) => {
+      offensesBody.replaceChildren();
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 6;
+      cell.className = "empty-row";
+      cell.textContent = `Could not load cases: ${error.message}`;
+      row.append(cell);
+      offensesBody.append(row);
+    });
+    loadSystemSettings().catch((error) => {
+      systemSettings.textContent = `Could not load system settings: ${error.message}`;
+    });
+  </script>
+</body>
+</html>

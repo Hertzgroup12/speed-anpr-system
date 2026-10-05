@@ -75,9 +75,9 @@ The notice action is available only after a case is marked reviewed, requires an
 - `GET /health` — liveness check
 - `GET /api/v1/config` — non-secret threshold, camera, and integration settings
 - `POST /api/v1/analyze` — upload a video and receive its measurements and review-case count
-- `WS /api/v1/live` — stres/am browser camera frames for live measurements
+- `WS /api/v1/live` — stream browser camera frames for live measurements
 - `GET /api/v1/offenses` — list cases for the dashboard
-- `PATCH /api/v1/offense{case_id}` — mark a case `reviewed` or `dismissed`
+- `PATCH /api/v1/offenses/{case_id}` — mark a case `reviewed` or `dismissed`
 - `POST /api/v1/offenses/{case_id}/notify` — simulate or explicitly send a notice after review
 - `GET /api/v1/captures/{capture_id}.jpg` — view a local vehicle/plate capture
 

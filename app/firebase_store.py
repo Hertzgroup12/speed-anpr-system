@@ -27,6 +27,7 @@ def persist_events(
     events: list[dict[str, Any]],
     video_name: str,
     settings: Settings,
+    metadata: dict[str, Any] | None = None,
 ) -> int:
     """Write each analyzed event to Firestore and return the number saved."""
     if not settings.firebase_enabled or not events:
@@ -41,6 +42,7 @@ def persist_events(
         collection.document().set(
             {
                 **event,
+                **(metadata or {}),
                 "video_name": video_name,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
