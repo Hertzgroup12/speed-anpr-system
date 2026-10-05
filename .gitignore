@@ -1,4 +1,6 @@
 .venv/
+.venv-*/
+.ENV/
 __pycache__/
 .pytest_cache/
 .env
@@ -7,3 +9,9 @@ __pycache__/
 *.onnx
 *.engine
 data/captures/
+.coverage
+htmlcov/
+build/
+dist/
+*.log
+.DS_Store
