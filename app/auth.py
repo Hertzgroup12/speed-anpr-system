@@ -37,13 +37,13 @@ def credentials_match(
     )
 
 
-def create_session_token(settings: Settings) -> str:
-    """Create an authenticated cookie token that expires after eight hours."""
+def create_session_token(settings: Settings, username: str | None = None) -> str:
+    """Create a signed session token for the named operator."""
     if not auth_is_configured(settings):
         raise ValueError("Authentication is not configured")
     expires_at = int(time.time()) + SESSION_MAX_AGE_SECONDS
     payload = base64.urlsafe_b64encode(
-        f"{settings.app_username}\n{expires_at}".encode("utf-8")
+        f"{username or settings.app_username}\n{expires_at}".encode("utf-8")
     ).rstrip(b"=")
     signature = hmac.new(
         (settings.app_secret_key or "").encode("utf-8"),
@@ -76,9 +76,6 @@ def verify_session_token(token: str | None, settings: Settings) -> bool:
             encoded_payload + "=" * (-len(encoded_payload) % 4)
         ).decode("utf-8")
         username, expires_at = decoded_payload.rsplit("\n", maxsplit=1)
-        return (
-            secrets.compare_digest(username, settings.app_username or "")
-            and int(expires_at) > int(time.time())
-        )
+        return bool(username) and int(expires_at) > int(time.time())
     except (binascii.Error, ValueError, UnicodeDecodeError):
         return False

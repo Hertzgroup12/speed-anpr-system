@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     app_username: str | None = None
     app_password: str | None = None
     app_secret_key: str | None = None
+    admin_invite_code: str | None = None
     auth_cookie_secure: bool = False
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
