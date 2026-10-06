@@ -76,6 +76,12 @@ def verify_session_token(token: str | None, settings: Settings) -> bool:
             encoded_payload + "=" * (-len(encoded_payload) % 4)
         ).decode("utf-8")
         username, expires_at = decoded_payload.rsplit("\n", maxsplit=1)
-        return bool(username) and int(expires_at) > int(time.time())
+        if not username or not secrets.compare_digest(
+            username,
+            settings.app_username or "",
+        ):
+            return False
+        expires_at_epoch = int(expires_at)
+        return expires_at_epoch > int(time.time())
     except (binascii.Error, ValueError, UnicodeDecodeError):
         return False
