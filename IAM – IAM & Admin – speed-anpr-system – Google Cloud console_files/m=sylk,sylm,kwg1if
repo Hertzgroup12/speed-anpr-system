@@ -1,0 +1,14 @@
+"use strict";this.default_r_xzwzfcd=this.default_r_xzwzfcd||{};(function(_){var window=this;
+try{
+var fnh=function(a,b){return a.length!==b.length?!1:a.every((c,d)=>c.path===b[d].path)},gnh=function(a){var b=a.children.primary;return b?[...a.segments,...gnh(b)]:a.segments};_.hnh=function(a){var b=a.doc.getElementById("main"),c=a.doc.activeElement;c&&c!==a.doc.body&&c!==a.doc.documentElement&&c!==b||b&&b!==c&&_.rUa(b)};
+_.inh=class{constructor(a,b,c){this.childrenOutletContexts=a;this.doc=b;this.router=c;a=c.events.pipe(_.Ue(d=>d instanceof _.up||d instanceof _.di),_.ig(null),_.Xf(),_.Ue(([d,e])=>!(d instanceof _.up&&e instanceof _.up)),_.A(([,d])=>d));b=_.Oe(b,"focus",{capture:!0}).pipe(_.ng(a),_.Ue(([,d])=>d instanceof _.up),_.A(([,d])=>d.id),_.ig(-1));a.pipe(_.A(d=>{var e=this.router.url,f,g=(f=this.childrenOutletContexts.getContext("primary"))==null?void 0:f.route;f=g?_.Gp(this.router,["."],{relativeTo:g}):null;
+return{event:d,url:e,rootOutletTree:f,activeSandboxId:this.getActiveSandboxId()}}),_.Xf(),_.Ue(([d])=>d.event instanceof _.up)).pipe(_.ng(b),_.Ue(([[d,e],f])=>{(f=d.event.id===f&&document.activeElement!==document.body||!this.shouldHandleNavigation(d,e))||(d=d.rootOutletTree,e=e.rootOutletTree,d&&e?(d=gnh(d.root),e=gnh(e.root),e=!fnh(d,e)):e=!1,f=!e);return f?!1:!0}),_.C(()=>_.Qe(100))).subscribe(()=>{_.hnh(this)},d=>{this.logError(d)})}logError(a){var b=a instanceof Error?a.message:`${a}`;a={stack:a instanceof
+Error?a.stack||"":""};_.zi().logClientError({message:b,metadata:a,eventType:"navigationFocus",eventName:"navigationFocusError",errorExperience:6})}};_.on([_.kXa(1,(0,_.H4a)(_.ci)),_.lXa([_.vp,Document,_.km])],_.inh);
+}catch(e){_._DumpException(e)}
+try{
+_.ki("kwg1if");
+_.AWa=class extends _.inh{constructor(){var a=_.m(_.vp),b=_.m(_.ci),c=_.m(_.km);super(a,b,c)}shouldHandleNavigation(a,b){return!_.oi(a.url).getPath().endsWith("rif-empty-page")&&!_.oi(b.url).getPath().endsWith("rif-empty-page")}getActiveSandboxId(){return null}};_.AWa.\u0275fac=function(a){return new (a||_.AWa)};_.AWa.\u0275prov=_.l({token:_.AWa,factory:_.AWa.\u0275fac,providedIn:"root"});
+_.li();
+}catch(e){_._DumpException(e)}
+}).call(this,this.default_r_xzwzfcd);
+// Google Inc.

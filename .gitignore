@@ -8,6 +8,7 @@ __pycache__/
 *.pt
 *.onnx
 *.engine
+*-firebase-adminsdk-*.json
 data/captures/
 .coverage
 htmlcov/

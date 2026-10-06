@@ -1,0 +1,14 @@
+"use strict";this.default_r_qkuwcrsqh=this.default_r_qkuwcrsqh||{};(function(_){var window=this;
+try{
+var Yfh=function(a,b){return a.length!==b.length?!1:a.every((c,d)=>c.path===b[d].path)},Zfh=function(a){var b=a.children.primary;return b?[...a.segments,...Zfh(b)]:a.segments};_.$fh=function(a){var b=a.doc.getElementById("main"),c=a.doc.activeElement;c&&c!==a.doc.body&&c!==a.doc.documentElement&&c!==b||b&&b!==c&&_.KXb(b)};
+_.agh=class{constructor(a,b,c){this.childrenOutletContexts=a;this.doc=b;this.router=c;a=c.events.pipe(_.Of(d=>d instanceof _.Ap||d instanceof _.bj),_.Wg(null),_.Ng(),_.Of(([d,e])=>!(d instanceof _.Ap&&e instanceof _.Ap)),_.C(([,d])=>d));b=_.Hf(b,"focus",{capture:!0}).pipe(_.ah(a),_.Of(([,d])=>d instanceof _.Ap),_.C(([,d])=>d.id),_.Wg(-1));a.pipe(_.C(d=>{var e=this.router.url,f,g=(f=this.childrenOutletContexts.getContext("primary"))==null?void 0:f.route;f=g?_.Vp(this.router,["."],{relativeTo:g}):null;
+return{event:d,url:e,rootOutletTree:f,activeSandboxId:this.getActiveSandboxId()}}),_.Ng(),_.Of(([d])=>d.event instanceof _.Ap)).pipe(_.ah(b),_.Of(([[d,e],f])=>{(f=d.event.id===f&&document.activeElement!==document.body||!this.shouldHandleNavigation(d,e))||(d=d.rootOutletTree,e=e.rootOutletTree,d&&e?(d=Zfh(d.root),e=Zfh(e.root),e=!Yfh(d,e)):e=!1,f=!e);return f?!1:!0}),_.Xg(()=>_.Kf(100))).subscribe(()=>{_.$fh(this)},d=>{this.logError(d)})}logError(a){var b=a instanceof Error?a.message:`${a}`;a={stack:a instanceof
+Error?a.stack||"":""};_.xj().logClientError({message:b,metadata:a,eventType:"navigationFocus",eventName:"navigationFocusError",errorExperience:6})}};_.$B([_.LXb((0,_.k1a)(_.aj)),_.MXb([_.Cp,Document,_.Xp])],_.agh);
+}catch(e){_._DumpException(e)}
+try{
+_.ij("kwg1if");
+_.$m=class extends _.agh{constructor(){var a=_.r(_.Cp),b=_.r(_.aj),c=_.r(_.Xp);super(a,b,c)}shouldHandleNavigation(a,b){return!_.mj(a.url).getPath().endsWith("rif-empty-page")&&!_.mj(b.url).getPath().endsWith("rif-empty-page")}getActiveSandboxId(){return null}};_.$m.\u0275fac=function(a){return new (a||_.$m)};_.$m.\u0275prov=_.m({token:_.$m,factory:_.$m.\u0275fac,providedIn:"root"});
+_.jj();
+}catch(e){_._DumpException(e)}
+}).call(this,this.default_r_qkuwcrsqh);
+// Google Inc.
