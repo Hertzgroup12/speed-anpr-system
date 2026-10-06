@@ -23,10 +23,17 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from google.api_core.exceptions import GoogleAPICallError
 from pydantic import BaseModel, Field, ValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from app.accounts import (
+    authenticate_registered_user,
+    invite_code_matches,
+    register_user,
+    valid_signup_username,
+)
 from app.analyzer import (
     AnalysisInputError,
     LiveCameraSession,
@@ -57,6 +64,7 @@ UPLOAD_CHUNK_SIZE = 1024 * 1024
 CHAT_REQUESTS_PER_MINUTE = 10
 LOGIN_ATTEMPTS_PER_WINDOW = 10
 LOGIN_WINDOW_SECONDS = 15 * 60
+SIGNUP_ATTEMPTS_PER_WINDOW = 10
 _CHAT_REQUESTS: dict[str, deque[float]] = {}
 _CHAT_REQUESTS_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, deque[float]] = {}
@@ -88,8 +96,14 @@ def _secure_session_cookie(request: Request) -> bool:
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=100)
+    username: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=256)
+
+
+class SignupRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=12, max_length=256)
+    invite_code: str = Field(min_length=1, max_length=256)
 
 
 class ChatRequest(BaseModel):
@@ -315,6 +329,11 @@ def auth_session(request: Request) -> dict[str, bool]:
             request.cookies.get(SESSION_COOKIE),
             settings,
         ),
+        "signup_enabled": bool(
+            settings.firebase_enabled
+            and settings.admin_invite_code
+            and len(settings.admin_invite_code) >= 20
+        ),
     }
 
 
@@ -341,7 +360,24 @@ def login(request: Request, credentials: LoginRequest) -> JSONResponse:
                 status_code=429,
                 detail="Too many sign-in attempts. Wait 15 minutes before trying again.",
             )
-    if not credentials_match(credentials.username, credentials.password, settings):
+    authenticated = credentials_match(
+        credentials.username,
+        credentials.password,
+        settings,
+    )
+    if not authenticated:
+        try:
+            authenticated = authenticate_registered_user(
+                credentials.username,
+                credentials.password,
+                settings,
+            )
+        except GoogleAPICallError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="Account service is temporarily unavailable",
+            ) from error
+    if not authenticated:
         with _LOGIN_ATTEMPTS_LOCK:
             _LOGIN_ATTEMPTS[client_host].append(now)
         raise HTTPException(status_code=401, detail="Invalid username or password")
@@ -351,7 +387,87 @@ def login(request: Request, credentials: LoginRequest) -> JSONResponse:
     response = JSONResponse({"authenticated": True})
     response.set_cookie(
         SESSION_COOKIE,
-        create_session_token(settings),
+        create_session_token(settings, credentials.username),
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=_secure_session_cookie(request),
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/v1/auth/signup", status_code=201)
+def signup(request: Request, credentials: SignupRequest) -> JSONResponse:
+    """Create an invite-only Firestore account and sign the new user in."""
+    settings = get_settings()
+    if not auth_is_configured(settings):
+        raise HTTPException(
+            status_code=503,
+            detail="Login signing is not configured on this server",
+        )
+    if not settings.firebase_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="New account registration is unavailable because Firebase is disabled",
+        )
+    if not settings.admin_invite_code or len(settings.admin_invite_code) < 20:
+        raise HTTPException(
+            status_code=503,
+            detail="Invite-only sign-up is not configured on this server",
+        )
+
+    if not valid_signup_username(credentials.username):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+    if (
+        settings.app_username
+        and credentials.username.strip().casefold()
+        == settings.app_username.strip().casefold()
+    ):
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    client_host = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _LOGIN_ATTEMPTS_LOCK:
+        recent_attempts = _LOGIN_ATTEMPTS.setdefault(
+            f"signup:{client_host}",
+            deque(),
+        )
+        while recent_attempts and now - recent_attempts[0] >= LOGIN_WINDOW_SECONDS:
+            recent_attempts.popleft()
+        if len(recent_attempts) >= SIGNUP_ATTEMPTS_PER_WINDOW:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many sign-up attempts. Wait 15 minutes before trying again.",
+            )
+        recent_attempts.append(now)
+
+    if not invite_code_matches(credentials.invite_code, settings):
+        raise HTTPException(status_code=403, detail="Invalid invitation code")
+    try:
+        register_user(credentials.username, credentials.password, settings)
+    except FileExistsError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email already exists",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except GoogleAPICallError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Account service is temporarily unavailable",
+        ) from error
+
+    username = credentials.username.strip().casefold()
+    response = JSONResponse(
+        {"authenticated": True, "username": username},
+        status_code=201,
+    )
+    response.set_cookie(
+        SESSION_COOKIE,
+        create_session_token(settings, username),
         max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
         secure=_secure_session_cookie(request),
