@@ -70,6 +70,72 @@ DRIVER_DIRECTORY={"TEST1234":"+233200000000"}
 
 The notice action is available only after a case is marked reviewed, requires an explicit dashboard action, and cannot be repeated for the same case. To enable live Africa's Talking requests, configure valid account credentials and set `SMS_SIMULATION=false`. Live sends are billable and may reach real recipients; test with numbers you control and obtain any required consent first. The application has no authentication, so do not expose it to the public internet.
 
+## Deploy to Google Cloud Run
+
+This app has no sign-in or authorization. Deploy it as a **private Cloud Run service**; do not allow unauthenticated/public access to footage, plate data, or case actions. The container uses Cloud Run's `PORT` setting and loads Firebase Admin credentials from the Cloud Run service identity (Application Default Credentials), so no service-account JSON key needs to be uploaded.
+
+1. Push the project to GitHub, making sure `.env` and all service-account JSON files remain untracked.
+2. In [Google Cloud Shell](https://console.cloud.google.com/?cloudshell=true), clone the repository and enter its directory:
+
+   ```bash
+   git clone https://github.com/Hertzgroup12/speed-anpr-system.git
+   cd speed-anpr-system
+   ```
+
+   If deploying a newer commit, pull it in this directory before continuing.
+
+3. Set the project and enable the Cloud Run build services:
+
+   ```bash
+   gcloud config set project speed-anpr-system
+   gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+   ```
+
+4. Create a dedicated runtime identity and grant it Firestore access:
+
+   ```bash
+   gcloud iam service-accounts create jnrd-pro-runtime --display-name="JNRD PRO Cloud Run"
+   gcloud projects add-iam-policy-binding speed-anpr-system \
+     --member="serviceAccount:jnrd-pro-runtime@speed-anpr-system.iam.gserviceaccount.com" \
+     --role="roles/datastore.user"
+   ```
+
+   If the service account already exists, skip its create command. The identity needs the Firestore/Datastore User role to read and write the configured Firestore database.
+
+5. Deploy privately in the Netherlands region:
+
+   ```bash
+   gcloud run deploy jnrd-pro \
+     --source . \
+     --region europe-west4 \
+     --service-account jnrd-pro-runtime@speed-anpr-system.iam.gserviceaccount.com \
+     --memory 8Gi \
+     --cpu 4 \
+     --timeout 900 \
+     --concurrency 1 \
+     --max 2 \
+     --no-allow-unauthenticated \
+     --set-env-vars FIREBASE_ENABLED=true,FIREBASE_PROJECT_ID=speed-anpr-system,MAX_UPLOAD_MB=25
+   ```
+
+   Keep `FIREBASE_CREDENTIALS` unset on Cloud Run. The service identity provides credentials. The 25 MB upload limit stays below Cloud Run's request-size limit; the app's larger local upload default does not apply to Cloud Run. The first video analysis may take longer while YOLO and OCR models are downloaded.
+
+6. Verify the service is healthy:
+
+   ```bash
+   gcloud run services describe jnrd-pro --region europe-west4 --format="value(status.url)"
+   ```
+
+   Access is private by default. To test from Cloud Shell, use the Cloud Run proxy:
+
+   ```bash
+   gcloud run services proxy jnrd-pro --region europe-west4 --port 8080
+   ```
+
+   In another Cloud Shell terminal, check `http://localhost:8080/health` and `http://localhost:8080/api/v1/config`. Stop the proxy with Ctrl+C. To let another operator use the service, grant that Google identity the `roles/run.invoker` role; do not grant `allUsers`.
+
+Cloud Run's local filesystem is temporary: image captures may disappear when an instance stops, and instances do not share files. Firestore cases persist, but capture images are not backed up there. Use private Cloud Storage with access controls and retention rules before relying on captures in a real deployment. Cloud Run costs may include build, CPU/memory, and storage charges; review Google Cloud pricing and billing alerts first.
+
 ## API
 
 - `GET /health` — liveness check

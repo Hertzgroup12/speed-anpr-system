@@ -1,0 +1,15 @@
+.git
+.venv
+.venv-*
+__pycache__
+.pytest_cache
+.env
+.env.*
+*.pt
+*.onnx
+*.engine
+*-firebase-adminsdk-*.json
+data/captures
+tests
+.coverage
+htmlcov
