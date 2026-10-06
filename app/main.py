@@ -3,9 +3,13 @@
 import os
 import re
 import tempfile
+import threading
+import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 import cv2
 import numpy as np
@@ -20,7 +24,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from pydantic import BaseModel, Field, ValidationError
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.analyzer import (
@@ -30,6 +34,15 @@ from app.analyzer import (
     analyze_video,
     release_analysis_lock,
 )
+from app.auth import (
+    SESSION_COOKIE,
+    SESSION_MAX_AGE_SECONDS,
+    auth_is_configured,
+    create_session_token,
+    credentials_match,
+    verify_session_token,
+)
+from app.chatbot import MAX_MESSAGE_LENGTH, ask_gemini
 from app.config import get_settings
 from app.firebase_store import persist_events
 from app.offenses import (
@@ -41,6 +54,13 @@ from app.offenses import (
 
 ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+CHAT_REQUESTS_PER_MINUTE = 10
+LOGIN_ATTEMPTS_PER_WINDOW = 10
+LOGIN_WINDOW_SECONDS = 15 * 60
+_CHAT_REQUESTS: dict[str, deque[float]] = {}
+_CHAT_REQUESTS_LOCK = threading.Lock()
+_LOGIN_ATTEMPTS: dict[str, deque[float]] = {}
+_LOGIN_ATTEMPTS_LOCK = threading.Lock()
 
 app = FastAPI(
     title="JNRD PRO",
@@ -55,6 +75,27 @@ app = FastAPI(
 WEB_APP_FILE = Path(__file__).parent / "static" / "index.html"
 
 
+def _secure_session_cookie(request: Request) -> bool:
+    """Use Secure cookies for HTTPS, including TLS-terminating proxy tunnels."""
+    return (
+        get_settings().auth_cookie_secure
+        or request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "").split(",", maxsplit=1)[0]
+        .strip()
+        .lower()
+        == "https"
+    )
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
+
+
 class VehicleEvent(BaseModel):
     track_id: int
     plate_number: str | None
@@ -67,6 +108,74 @@ class VehicleEvent(BaseModel):
     case_id: str | None
     vehicle_capture_url: str | None
     plate_capture_url: str | None
+
+
+@app.middleware("http")
+async def protect_operator_routes(request: Request, call_next: Any) -> Any:
+    """Require an authenticated session for API, capture, and docs routes."""
+    response = None
+    protected_path = (
+        request.url.path.startswith("/api/")
+        or request.url.path in {"/docs", "/redoc", "/openapi.json"}
+    )
+    public_auth_paths = {
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/session",
+    }
+    if protected_path:
+        origin = request.headers.get("origin")
+        if (
+            request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            and origin
+            and urlsplit(origin).netloc != request.headers.get("host")
+        ):
+            response = JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-origin requests are not allowed"},
+            )
+        if (
+            response is None
+            and request.url.path not in public_auth_paths
+            and request.url.path != "/health"
+        ):
+            settings = get_settings()
+            if not auth_is_configured(settings):
+                response = JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": (
+                            "Login is not configured. Set APP_USERNAME, "
+                            "APP_PASSWORD, and a 32-character APP_SECRET_KEY."
+                        )
+                    },
+                )
+            elif not verify_session_token(
+                request.cookies.get(SESSION_COOKIE),
+                settings,
+            ):
+                response = JSONResponse(
+                    status_code=401,
+                    content={"detail": "Please sign in to continue"},
+                )
+    else:
+        response = None
+
+    if response is None:
+        response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: https://fastapi.tiangolo.com; "
+        "media-src 'self' blob:; connect-src 'self' ws: wss:; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    return response
 
 
 class AnalysisResponse(BaseModel):
@@ -192,7 +301,111 @@ def public_config() -> dict[str, Any]:
         "camera_location": settings.camera_location,
         "sms_simulation": settings.sms_simulation,
         "firebase_enabled": settings.firebase_enabled,
+        "chat_enabled": bool(settings.gemini_api_key),
     }
+
+
+@app.get("/api/v1/auth/session")
+def auth_session(request: Request) -> dict[str, bool]:
+    """Tell the login page whether credentials and a valid session are present."""
+    settings = get_settings()
+    return {
+        "configured": auth_is_configured(settings),
+        "authenticated": verify_session_token(
+            request.cookies.get(SESSION_COOKIE),
+            settings,
+        ),
+    }
+
+
+@app.post("/api/v1/auth/login")
+def login(request: Request, credentials: LoginRequest) -> JSONResponse:
+    """Authenticate the single configured operator and set an HTTP-only cookie."""
+    settings = get_settings()
+    if not auth_is_configured(settings):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Login is not configured. Set APP_USERNAME, APP_PASSWORD, "
+                "and a 32-character APP_SECRET_KEY."
+            ),
+        )
+    client_host = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _LOGIN_ATTEMPTS_LOCK:
+        recent_attempts = _LOGIN_ATTEMPTS.setdefault(client_host, deque())
+        while recent_attempts and now - recent_attempts[0] >= LOGIN_WINDOW_SECONDS:
+            recent_attempts.popleft()
+        if len(recent_attempts) >= LOGIN_ATTEMPTS_PER_WINDOW:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many sign-in attempts. Wait 15 minutes before trying again.",
+            )
+    if not credentials_match(credentials.username, credentials.password, settings):
+        with _LOGIN_ATTEMPTS_LOCK:
+            _LOGIN_ATTEMPTS[client_host].append(now)
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    with _LOGIN_ATTEMPTS_LOCK:
+        _LOGIN_ATTEMPTS.pop(client_host, None)
+    response = JSONResponse({"authenticated": True})
+    response.set_cookie(
+        SESSION_COOKIE,
+        create_session_token(settings),
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=_secure_session_cookie(request),
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/v1/auth/logout")
+def logout(request: Request) -> JSONResponse:
+    """Clear the operator's session cookie."""
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie(
+        SESSION_COOKIE,
+        httponly=True,
+        secure=_secure_session_cookie(request),
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/v1/chat")
+async def chat(request: ChatRequest) -> dict[str, str]:
+    """Answer a bounded operator question without sending case data to Gemini."""
+    message = request.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="Message must not be empty")
+    if len(message) > MAX_MESSAGE_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Message must be at most {MAX_MESSAGE_LENGTH} characters",
+        )
+    now = time.monotonic()
+    with _CHAT_REQUESTS_LOCK:
+        recent_requests = _CHAT_REQUESTS.setdefault(
+            get_settings().app_username or "operator",
+            deque(),
+        )
+        while recent_requests and now - recent_requests[0] >= 60:
+            recent_requests.popleft()
+        if len(recent_requests) >= CHAT_REQUESTS_PER_MINUTE:
+            raise HTTPException(
+                status_code=429,
+                detail="Chat limit reached. Please wait a minute before trying again.",
+            )
+        recent_requests.append(now)
+    try:
+        answer = await run_in_threadpool(ask_gemini, message, get_settings())
+    except RuntimeError as error:
+        status_code = 429 if "rate limiting" in str(error) else 503
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
+    return {"reply": answer}
 
 
 @app.get("/", include_in_schema=False)
@@ -248,6 +461,17 @@ def send_driver_notice(case_id: str) -> dict[str, Any]:
 @app.websocket("/api/v1/live")
 async def live_camera(websocket: WebSocket) -> None:
     """Receive browser webcam frames and report live speed events."""
+    origin = websocket.headers.get("origin")
+    if origin and urlsplit(origin).netloc != websocket.headers.get("host"):
+        await websocket.close(code=4403, reason="Cross-origin connection denied")
+        return
+    if not verify_session_token(
+        websocket.cookies.get(SESSION_COOKIE),
+        get_settings(),
+    ):
+        await websocket.close(code=4401, reason="Sign in required")
+        return
+
     await websocket.accept()
     lock_acquired = False
     try:

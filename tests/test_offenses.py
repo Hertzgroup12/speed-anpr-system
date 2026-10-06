@@ -100,6 +100,9 @@ def test_reviewed_case_can_use_dashboard_simulation(
         speed_limit_kmh=50,
         sms_simulation=True,
         driver_directory={"TEST1234": "SIMULATED_DRIVER_002"},
+        app_username="test-operator",
+        app_password="test-password-123",
+        app_secret_key="test-session-secret-that-is-long-enough",
     )
     cases = create_offenses(
         [make_event(62)],
@@ -110,6 +113,11 @@ def test_reviewed_case_can_use_dashboard_simulation(
     )
     monkeypatch.setattr(main, "get_settings", lambda: settings)
     client = TestClient(main.app)
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": settings.app_username, "password": settings.app_password},
+    )
+    assert login.status_code == 200
     case_id = cases[0]["case_id"]
 
     blocked = client.post(f"/api/v1/offenses/{case_id}/notify")

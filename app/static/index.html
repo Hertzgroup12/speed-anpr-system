@@ -16,6 +16,7 @@
     }
 
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
 
     body { margin: 0; min-width: 320px; }
 
@@ -136,6 +137,44 @@
     button.stop { background: #a52a2a; }
     button.stop:hover:not(:disabled) { background: #872020; }
 
+    .login-panel { width: min(100% - 32px, 440px); margin: 10vh auto; }
+    .login-panel form { display: grid; gap: 16px; margin-top: 20px; }
+    .login-panel input {
+      min-height: 44px;
+      padding: 9px 11px;
+      border: 1px solid #9fb3c8;
+      border-radius: 7px;
+      font: inherit;
+    }
+    .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .app-bar button { min-height: 38px; padding: 8px 14px; }
+    .chat-log {
+      display: grid;
+      gap: 12px;
+      max-height: 360px;
+      overflow-y: auto;
+      margin: 16px 0;
+      padding: 12px;
+      border-radius: 8px;
+      background: #f3f6fa;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .chat-message { margin: 0; padding: 10px 12px; border-radius: 8px; background: white; }
+    .chat-message.user { background: #e4f1fb; }
+    .chat-form { display: flex; align-items: end; gap: 10px; }
+    .chat-form label { flex: 1; }
+    .chat-form textarea {
+      width: 100%;
+      min-height: 76px;
+      resize: vertical;
+      padding: 10px;
+      border: 1px solid #9fb3c8;
+      border-radius: 7px;
+      font: inherit;
+    }
+    .chat-disabled { color: #8a1c1c; }
+
     footer { padding: 0 16px 28px; color: #52667a; text-align: center; font-size: .9rem; }
     footer a { color: #1769aa; }
 
@@ -147,12 +186,32 @@
   </style>
 </head>
 <body>
-  <header>
+  <section id="login-panel" class="panel login-panel" aria-labelledby="login-heading">
+    <h1 id="login-heading">Sign in to JNRD PRO</h1>
+    <p class="hint">Use the operator username and password configured by your administrator.</p>
+    <form id="login-form">
+      <label for="login-username">Username
+        <input id="login-username" name="username" type="text" autocomplete="username" maxlength="100" required>
+      </label>
+      <label for="login-password">Password
+        <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+      </label>
+      <button id="login-button" type="submit">Sign in</button>
+      <p id="login-status" class="status" role="status" aria-live="polite" hidden></p>
+    </form>
+  </section>
+
+  <header id="app-header" hidden>
+    <div class="app-bar">
+      <div>
     <h1>JNRD PRO</h1>
     <p>Upload a traffic video to detect vehicles, estimate their speed, and read visible number plates.</p>
+      </div>
+      <button id="logout-button" type="button">Sign out</button>
+    </div>
   </header>
 
-  <main>
+  <main id="operator-app" hidden>
     <section class="panel" aria-labelledby="upload-heading">
       <h2 id="upload-heading">Analyze a video</h2>
       <p id="system-settings" class="summary" role="status">Loading system settings…</p>
@@ -264,9 +323,30 @@
         </table>
       </div>
     </section>
+
+    <section class="panel" aria-labelledby="chat-heading">
+      <h2 id="chat-heading">JNRD PRO AI assistant</h2>
+      <p class="hint">
+        Ask general questions about using the software. Do not enter plate numbers,
+        personal data, or case details; messages are sent to Google Gemini.
+      </p>
+      <p id="chat-disabled" class="chat-disabled" hidden>
+        AI chat is not configured. An administrator must set GEMINI_API_KEY on the server.
+      </p>
+      <div id="chat-log" class="chat-log" role="log" aria-live="polite">
+        <p class="chat-message">Hello! I can answer general questions about JNRD PRO.</p>
+      </div>
+      <form id="chat-form" class="chat-form">
+        <label for="chat-message">Message
+          <textarea id="chat-message" name="message" maxlength="2000" required></textarea>
+        </label>
+        <button id="chat-button" type="submit">Send</button>
+      </form>
+      <p id="chat-status" class="status" role="status" aria-live="polite" hidden></p>
+    </section>
   </main>
 
-  <footer>
+  <footer id="app-footer" hidden>
     Speed readings are estimates and require accurate camera calibration.
     <a href="/docs">API documentation</a>
   </footer>
@@ -286,6 +366,20 @@
     const lineOverlay = document.querySelector("#line-overlay");
     const startCameraButton = document.querySelector("#start-camera");
     const stopCameraButton = document.querySelector("#stop-camera");
+    const loginPanel = document.querySelector("#login-panel");
+    const loginForm = document.querySelector("#login-form");
+    const loginButton = document.querySelector("#login-button");
+    const loginStatus = document.querySelector("#login-status");
+    const appHeader = document.querySelector("#app-header");
+    const operatorApp = document.querySelector("#operator-app");
+    const appFooter = document.querySelector("#app-footer");
+    const logoutButton = document.querySelector("#logout-button");
+    const chatForm = document.querySelector("#chat-form");
+    const chatInput = document.querySelector("#chat-message");
+    const chatButton = document.querySelector("#chat-button");
+    const chatLog = document.querySelector("#chat-log");
+    const chatStatus = document.querySelector("#chat-status");
+    const chatDisabled = document.querySelector("#chat-disabled");
     let cameraStream = null;
     let cameraSocket = null;
     let cameraRunning = false;
@@ -300,6 +394,61 @@
     function showCameraStatus(message, kind = "") {
       cameraStatus.textContent = message;
       cameraStatus.className = `status ${kind}`;
+    }
+
+    function showLoginStatus(message, kind = "error") {
+      loginStatus.textContent = message;
+      loginStatus.className = `status ${kind}`;
+      loginStatus.hidden = false;
+    }
+
+    function showChatStatus(message, kind = "error") {
+      chatStatus.textContent = message;
+      chatStatus.className = `status ${kind}`;
+      chatStatus.hidden = !message;
+    }
+
+    function showOperatorApp() {
+      loginPanel.hidden = true;
+      appHeader.hidden = false;
+      operatorApp.hidden = false;
+      appFooter.hidden = false;
+      refreshOffenses().catch((error) => {
+        offensesBody.replaceChildren();
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 6;
+        cell.className = "empty-row";
+        cell.textContent = `Could not load cases: ${error.message}`;
+        row.append(cell);
+        offensesBody.append(row);
+      });
+      loadSystemSettings().then((settings) => {
+        chatDisabled.hidden = settings.chat_enabled;
+        chatForm.hidden = !settings.chat_enabled;
+      }).catch((error) => {
+        systemSettings.textContent = `Could not load system settings: ${error.message}`;
+      });
+    }
+
+    async function initializeLogin() {
+      try {
+        const response = await fetch("/api/v1/auth/session");
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Could not check login status.");
+        if (!result.configured) {
+          showLoginStatus(
+            "Login is not configured. Set APP_USERNAME, APP_PASSWORD, and APP_SECRET_KEY on the server.",
+          );
+          loginButton.disabled = true;
+          return;
+        }
+        if (result.authenticated) {
+          showOperatorApp();
+        }
+      } catch (error) {
+        showLoginStatus(error.message);
+      }
     }
 
     function drawMeasurementLines() {
@@ -551,6 +700,7 @@
         `Camera: ${settings.camera_location} · ` +
         `SMS: ${settings.sms_simulation ? "simulation only" : "live sending enabled"} · ` +
         `Firestore: ${settings.firebase_enabled ? "enabled" : "in-memory demo"}`;
+      return settings;
     }
 
     async function refreshOffenses() {
@@ -743,19 +893,72 @@
     startCameraButton.addEventListener("click", startLiveCamera);
     stopCameraButton.addEventListener("click", () => stopLiveCamera());
 
-    refreshOffenses().catch((error) => {
-      offensesBody.replaceChildren();
-      const row = document.createElement("tr");
-      const cell = document.createElement("td");
-      cell.colSpan = 6;
-      cell.className = "empty-row";
-      cell.textContent = `Could not load cases: ${error.message}`;
-      row.append(cell);
-      offensesBody.append(row);
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      loginButton.disabled = true;
+      loginStatus.hidden = true;
+      try {
+        const response = await fetch("/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: loginForm.elements.username.value,
+            password: loginForm.elements.password.value,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Sign-in failed.");
+        loginForm.reset();
+        showOperatorApp();
+      } catch (error) {
+        showLoginStatus(error.message);
+      } finally {
+        loginButton.disabled = false;
+      }
     });
-    loadSystemSettings().catch((error) => {
-      systemSettings.textContent = `Could not load system settings: ${error.message}`;
+
+    logoutButton.addEventListener("click", async () => {
+      stopLiveCamera();
+      try {
+        await fetch("/api/v1/auth/logout", { method: "POST" });
+      } finally {
+        window.location.reload();
+      }
     });
+
+    chatForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const message = chatInput.value.trim();
+      if (!message) return;
+      const userMessage = document.createElement("p");
+      userMessage.className = "chat-message user";
+      userMessage.textContent = `You: ${message}`;
+      chatLog.append(userMessage);
+      chatInput.value = "";
+      chatButton.disabled = true;
+      showChatStatus("Thinking…", "success");
+      try {
+        const response = await fetch("/api/v1/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "The assistant could not reply.");
+        const assistantMessage = document.createElement("p");
+        assistantMessage.className = "chat-message";
+        assistantMessage.textContent = `JNRD PRO AI: ${result.reply}`;
+        chatLog.append(assistantMessage);
+        chatLog.scrollTop = chatLog.scrollHeight;
+        showChatStatus("");
+      } catch (error) {
+        showChatStatus(error.message);
+      } finally {
+        chatButton.disabled = false;
+      }
+    });
+
+    initializeLogin();
   </script>
 </body>
 </html>

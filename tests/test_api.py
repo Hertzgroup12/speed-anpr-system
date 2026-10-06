@@ -1,5 +1,7 @@
 """Lightweight API tests; AI models are not loaded by these endpoints."""
 
+from collections.abc import Iterator
+
 import cv2
 import numpy as np
 import pytest
@@ -9,6 +11,27 @@ from app.config import Settings
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def sign_in_api_client() -> Iterator[None]:
+    from app import main
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    with main._LOGIN_ATTEMPTS_LOCK:
+        main._LOGIN_ATTEMPTS.clear()
+    client.cookies.clear()
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "test-operator", "password": "test-password-123"},
+    )
+    assert response.status_code == 200
+    yield
+    client.cookies.clear()
+    with main._LOGIN_ATTEMPTS_LOCK:
+        main._LOGIN_ATTEMPTS.clear()
+    get_settings.cache_clear()
 
 
 def test_health_does_not_require_model_initialization() -> None:
@@ -24,6 +47,8 @@ def test_homepage_serves_the_browser_app() -> None:
     assert response.status_code == 200
     assert "<title>JNRD PRO</title>" in response.text
     assert "<h1>JNRD PRO</h1>" in response.text
+    assert 'id="login-form"' in response.text
+    assert 'id="chat-form"' in response.text
     assert 'fetch("/api/v1/analyze"' in response.text
     assert "getUserMedia" in response.text
 
@@ -33,6 +58,122 @@ def test_openapi_uses_the_product_name() -> None:
 
     assert response.status_code == 200
     assert response.json()["info"]["title"] == "JNRD PRO"
+
+
+def test_operator_api_requires_login() -> None:
+    unauthenticated_client = TestClient(app)
+
+    response = unauthenticated_client.get("/api/v1/config")
+
+    assert response.status_code == 401
+
+
+def test_login_rejects_invalid_credentials() -> None:
+    unauthenticated_client = TestClient(app)
+
+    response = unauthenticated_client.post(
+        "/api/v1/auth/login",
+        json={"username": "wrong-user", "password": "wrong-password"},
+    )
+
+    assert response.status_code == 401
+    assert "jnrd_session" not in unauthenticated_client.cookies
+
+
+def test_login_rate_limits_repeated_invalid_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+
+    monkeypatch.setattr(main, "LOGIN_ATTEMPTS_PER_WINDOW", 2)
+    rate_limited_client = TestClient(app, client=("192.0.2.1", 50000))
+
+    first = rate_limited_client.post(
+        "/api/v1/auth/login",
+        json={"username": "wrong-user", "password": "wrong-password"},
+    )
+    second = rate_limited_client.post(
+        "/api/v1/auth/login",
+        json={"username": "wrong-user", "password": "wrong-password"},
+    )
+    third = rate_limited_client.post(
+        "/api/v1/auth/login",
+        json={"username": "test-operator", "password": "test-password-123"},
+    )
+
+    assert first.status_code == 401
+    assert second.status_code == 401
+    assert third.status_code == 429
+
+
+def test_login_cookie_is_http_only_and_strict() -> None:
+    unauthenticated_client = TestClient(app)
+
+    response = unauthenticated_client.post(
+        "/api/v1/auth/login",
+        json={"username": "test-operator", "password": "test-password-123"},
+    )
+
+    assert response.status_code == 200
+    cookie = response.headers["set-cookie"].lower()
+    assert "httponly" in cookie
+    assert "samesite=strict" in cookie
+
+
+def test_logout_clears_session_and_protected_routes_reject_it() -> None:
+    response = client.post("/api/v1/auth/logout")
+    protected_response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    assert protected_response.status_code == 401
+
+
+def test_operator_api_rejects_cross_origin_mutations() -> None:
+    response = client.post(
+        "/api/v1/chat",
+        headers={"Origin": "https://attacker.example"},
+        json={"message": "hello"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_api_fails_closed_when_login_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+    monkeypatch.delenv("APP_USERNAME", raising=False)
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+    monkeypatch.delenv("APP_SECRET_KEY", raising=False)
+    monkeypatch.setattr(main, "get_settings", lambda: Settings(_env_file=None))
+    unauthenticated_client = TestClient(app)
+
+    response = unauthenticated_client.get("/api/v1/config")
+
+    assert response.status_code == 503
+
+
+def test_chat_endpoint_uses_server_side_gemini_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+
+    monkeypatch.setattr(
+        main,
+        "ask_gemini",
+        lambda message, _settings: f"Help for: {message}",
+    )
+
+    response = client.post("/api/v1/chat", json={"message": "How do I review a case?"})
+
+    assert response.status_code == 200
+    assert response.json() == {"reply": "Help for: How do I review a case?"}
+
+
+def test_chat_endpoint_rejects_empty_messages() -> None:
+    response = client.post("/api/v1/chat", json={"message": "   "})
+
+    assert response.status_code == 422
 
 
 def test_live_websocket_rejects_invalid_calibration() -> None:
@@ -64,7 +205,15 @@ def test_live_websocket_processes_browser_camera_frames(
             self.frame_count += 1
             return []
 
-    monkeypatch.setattr(main, "get_settings", lambda: Settings())
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: Settings(
+            app_username="test-operator",
+            app_password="test-password-123",
+            app_secret_key="test-session-secret-that-is-long-enough",
+        ),
+    )
     monkeypatch.setattr(main, "LiveCameraSession", FakeLiveSession)
     monkeypatch.setattr(main, "acquire_analysis_lock", lambda: None)
     monkeypatch.setattr(main, "release_analysis_lock", lambda: None)
@@ -106,6 +255,7 @@ def test_public_config_does_not_expose_sms_credentials() -> None:
 
     assert response.status_code == 200
     assert response.json()["speed_limit_kmh"] > 0
+    assert response.json()["firebase_enabled"] is False
     assert "africastalking_api_key" not in response.json()
 
 

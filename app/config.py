@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     firebase_credentials: str | None = None
     firebase_collection: str = "speed_events"
     offense_collection: str = "speed_offenses"
+    app_username: str | None = None
+    app_password: str | None = None
+    app_secret_key: str | None = None
+    auth_cookie_secure: bool = False
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.8-flash"
     speed_limit_kmh: float = Field(default=50.0, gt=0)
     camera_location: str = "Demo camera"
     capture_directory: str = "data/captures"

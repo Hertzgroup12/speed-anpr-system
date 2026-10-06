@@ -53,6 +53,31 @@ Copy `.env.example` to `.env`:
 | `AFRICASTALKING_USERNAME` | unset | Africa's Talking account username |
 | `AFRICASTALKING_API_KEY` | unset | Africa's Talking API key |
 | `AFRICASTALKING_SENDER_ID` | unset | Optional approved sender ID |
+| `APP_USERNAME` | unset | Required single operator login name |
+| `APP_PASSWORD` | unset | Required operator password (at least 12 characters) |
+| `APP_SECRET_KEY` | unset | Required random signing key (at least 32 characters) |
+| `AUTH_COOKIE_SECURE` | `false` | Set `true` when accessed over HTTPS |
+| `GEMINI_API_KEY` | unset | Optional Gemini API key for the AI assistant |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model used by the assistant |
+
+### Login and AI assistant
+
+The dashboard's API, review cases, captures, documentation, and live-camera WebSocket require a signed operator session. Configure `APP_USERNAME`, a unique `APP_PASSWORD` with at least 12 characters, and a cryptographically random `APP_SECRET_KEY` with at least 32 characters before starting the app. Without these settings the protected API fails closed. The session cookie is HTTP-only, SameSite strict, and expires after eight hours. Set `AUTH_COOKIE_SECURE=true` when using HTTPS (including a Cloudflare tunnel); leave it false only for local HTTP development.
+
+Generate a signing key in PowerShell:
+
+```powershell
+$bytes = New-Object byte[] 48
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+[Convert]::ToBase64String($bytes)
+```
+
+Copy the generated value into the ignored local `.env` as `APP_SECRET_KEY`, and configure the username and a strong password there too. Do not commit `.env` or share the password/signing key.
+
+To enable the AI assistant, create a Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey) and set `GEMINI_API_KEY` in the server environment. The key stays server-side. The assistant accepts up to 2,000 characters per request, allows 10 requests per minute per process, and does not receive dashboard cases or plate data automatically. Gemini calls use stateless requests (`store=false`); do not enter plate numbers or personal information in chat. Google API usage and quotas may apply.
+
+This login is a single shared operator account, not a multi-user identity system. Use a unique strong password, keep the app private where possible, and rotate credentials if they may have been exposed.
 
 ### Firebase
 
@@ -102,7 +127,30 @@ This app has no sign-in or authorization. Deploy it as a **private Cloud Run ser
 
    If the service account already exists, skip its create command. The identity needs the Firestore/Datastore User role to read and write the configured Firestore database.
 
-5. Deploy privately in the Netherlands region:
+5. Add the operator password, session signing key, and Gemini API key to Secret Manager. Do not commit or upload these values to GitHub:
+
+   ```bash
+   read -r -s -p "Operator password (12+ characters): " APP_PASSWORD; echo
+   printf '%s' "$APP_PASSWORD" | gcloud secrets create jnrd-pro-app-password --data-file=-
+   unset APP_PASSWORD
+
+   openssl rand -base64 48 | tr -d '\n' | gcloud secrets create jnrd-pro-app-secret --data-file=-
+
+   read -r -s -p "Gemini API key: " GEMINI_API_KEY; echo
+   printf '%s' "$GEMINI_API_KEY" | gcloud secrets create jnrd-pro-gemini-api-key --data-file=-
+   unset GEMINI_API_KEY
+
+   RUNTIME_SA="serviceAccount:jnrd-pro-runtime@speed-anpr-system.iam.gserviceaccount.com"
+   for secret in jnrd-pro-app-password jnrd-pro-app-secret jnrd-pro-gemini-api-key; do
+     gcloud secrets add-iam-policy-binding "$secret" \
+       --member="$RUNTIME_SA" \
+       --role="roles/secretmanager.secretAccessor"
+   done
+   ```
+
+   If a secret already exists, add a new version with `gcloud secrets versions add SECRET_NAME --data-file=-` instead of creating it again. The Gemini key is available from [Google AI Studio](https://aistudio.google.com/app/apikey).
+
+6. Deploy privately in the Netherlands region:
 
    ```bash
    gcloud run deploy jnrd-pro \
@@ -115,10 +163,11 @@ This app has no sign-in or authorization. Deploy it as a **private Cloud Run ser
      --concurrency 1 \
      --max 2 \
      --no-allow-unauthenticated \
-     --set-env-vars FIREBASE_ENABLED=true,FIREBASE_PROJECT_ID=speed-anpr-system,MAX_UPLOAD_MB=25
+     --set-env-vars FIREBASE_ENABLED=true,FIREBASE_PROJECT_ID=speed-anpr-system,MAX_UPLOAD_MB=25,APP_USERNAME=operator,AUTH_COOKIE_SECURE=true \
+     --set-secrets APP_PASSWORD=jnrd-pro-app-password:latest,APP_SECRET_KEY=jnrd-pro-app-secret:latest,GEMINI_API_KEY=jnrd-pro-gemini-api-key:latest
    ```
 
-   Keep `FIREBASE_CREDENTIALS` unset on Cloud Run. The service identity provides credentials. The 25 MB upload limit stays below Cloud Run's request-size limit; the app's larger local upload default does not apply to Cloud Run. The first video analysis may take longer while YOLO and OCR models are downloaded.
+   Keep `FIREBASE_CREDENTIALS` unset on Cloud Run. The service identity provides Firebase credentials. The 25 MB upload limit stays below Cloud Run's request-size limit; the app's larger local upload default does not apply to Cloud Run. The first video analysis may take longer while YOLO and OCR models are downloaded.
 
 6. Verify the service is healthy:
 
