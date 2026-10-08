@@ -77,7 +77,9 @@ Copy the generated value into the ignored local `.env` as `APP_SECRET_KEY`, and 
 
 To enable the AI assistant, create a Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey) and set `GEMINI_API_KEY` in the server environment. The key stays server-side. The assistant accepts up to 2,000 characters per request, allows 10 requests per minute per process, and does not receive dashboard cases or plate data automatically. Gemini calls use stateless requests (`store=false`); do not enter plate numbers or personal information in chat. Google API usage and quotas may apply.
 
-This login is a single shared operator account, not a multi-user identity system. Use a unique strong password, keep the app private where possible, and rotate credentials if they may have been exposed.
+The configured operator account is shared; invite-created accounts are individual logins but currently receive the same operator permissions. Use a unique strong password, keep the app private where possible, and rotate credentials if they may have been exposed.
+
+The sign-in page offers **Create account** when `FIREBASE_ENABLED=true` and a 20-character-or-longer `ADMIN_INVITE_CODE` is configured. New accounts use an email address, a password of at least 12 characters, and the invitation code; account records are stored in Firestore. The configured operator account remains available for administration.
 
 ### Firebase
 

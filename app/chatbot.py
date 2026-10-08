@@ -69,6 +69,23 @@ def ask_gemini(message: str, settings: Settings) -> str:
         and item.get("type") == "text"
         and isinstance(item.get("text"), str)
     ]
+    if not text_parts:
+        steps = result.get("steps", [])
+        if not isinstance(steps, list):
+            raise RuntimeError("Gemini returned an invalid response")
+        for step in steps:
+            if not isinstance(step, dict) or step.get("type") != "model_output":
+                continue
+            content = step.get("content", [])
+            if not isinstance(content, list):
+                raise RuntimeError("Gemini returned an invalid response")
+            text_parts.extend(
+                item["text"]
+                for item in content
+                if isinstance(item, dict)
+                and item.get("type") == "text"
+                and isinstance(item.get("text"), str)
+            )
     answer = "\n".join(text_parts).strip()
     if not answer:
         raise RuntimeError("Gemini returned no text response")

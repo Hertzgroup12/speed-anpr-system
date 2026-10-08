@@ -48,6 +48,10 @@ def test_homepage_serves_the_browser_app() -> None:
     assert "<title>JNRD PRO</title>" in response.text
     assert "<h1>JNRD PRO</h1>" in response.text
     assert 'id="login-form"' in response.text
+    assert 'id="create-account-button"' in response.text
+    assert 'id="signup-form"' in response.text
+    assert 'fetch("/api/v1/auth/signup"' in response.text
+    assert 'id="logout-button"' in response.text
     assert 'id="chat-form"' in response.text
     assert 'fetch("/api/v1/analyze"' in response.text
     assert "getUserMedia" in response.text

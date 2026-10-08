@@ -44,9 +44,25 @@ def test_gemini_request_keeps_api_key_server_side_and_disables_storage(
     assert "private-test-key" not in (request.data or b"").decode()
 
 
+def test_gemini_reads_text_from_interactions_model_output_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.chatbot.urlopen",
+        lambda *_args, **_kwargs: FakeResponse(
+            b'{"steps":[{"type":"model_thought","content":[{"type":"text","text":"hidden"}]},'
+            b'{"type":"model_output","content":[{"type":"text","text":"Gemini connection OK"}]}]}'
+        ),
+    )
+
+    answer = ask_gemini("Hello", Settings(gemini_api_key="private-test-key"))
+
+    assert answer == "Gemini connection OK"
+
+
 def test_gemini_requires_an_api_key() -> None:
     with pytest.raises(RuntimeError, match="not configured"):
-        ask_gemini("Hello", Settings())
+        ask_gemini("Hello", Settings(_env_file=None))
 
 
 def test_gemini_rejects_empty_model_response(

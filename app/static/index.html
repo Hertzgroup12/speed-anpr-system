@@ -139,6 +139,8 @@
 
     .login-panel { width: min(100% - 32px, 440px); margin: 10vh auto; }
     .login-panel form { display: grid; gap: 16px; margin-top: 20px; }
+    .auth-actions { display: grid; gap: 8px; margin-top: 16px; }
+    .auth-actions .hint { margin: 0; font-size: .9rem; }
     .login-panel input {
       min-height: 44px;
       padding: 9px 11px;
@@ -148,6 +150,7 @@
     }
     .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     .app-bar button { min-height: 38px; padding: 8px 14px; }
+    #logout-status { margin: 10px 0 0; }
     .chat-log {
       display: grid;
       gap: 12px;
@@ -191,13 +194,31 @@
     <p class="hint">Use the operator username and password configured by your administrator.</p>
     <form id="login-form">
       <label for="login-username">Username
-        <input id="login-username" name="username" type="text" autocomplete="username" maxlength="100" required>
+        <input id="login-username" name="username" type="text" autocomplete="username" maxlength="254" required>
       </label>
       <label for="login-password">Password
         <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
       </label>
       <button id="login-button" type="submit">Sign in</button>
       <p id="login-status" class="status" role="status" aria-live="polite" hidden></p>
+    </form>
+    <div id="account-actions" class="auth-actions">
+      <button id="create-account-button" type="button" disabled>Create account</button>
+      <p id="create-account-hint" class="hint">Checking account registration…</p>
+    </div>
+    <form id="signup-form" hidden>
+      <label for="signup-username">Email
+        <input id="signup-username" name="username" type="email" autocomplete="email" maxlength="254" required>
+      </label>
+      <label for="signup-password">Password (at least 12 characters)
+        <input id="signup-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required>
+      </label>
+      <label for="signup-invite-code">Invitation code
+        <input id="signup-invite-code" name="invite_code" type="password" autocomplete="off" minlength="20" maxlength="256" required>
+      </label>
+      <button id="signup-submit-button" type="submit">Create account</button>
+      <button id="back-to-login-button" type="button">Back to sign in</button>
+      <p id="signup-status" class="status" role="status" aria-live="polite" hidden></p>
     </form>
   </section>
 
@@ -207,8 +228,9 @@
     <h1>JNRD PRO</h1>
     <p>Upload a traffic video to detect vehicles, estimate their speed, and read visible number plates.</p>
       </div>
-      <button id="logout-button" type="button">Sign out</button>
+      <button id="logout-button" type="button">Log out</button>
     </div>
+    <p id="logout-status" class="status" role="status" aria-live="polite" hidden></p>
   </header>
 
   <main id="operator-app" hidden>
@@ -370,10 +392,18 @@
     const loginForm = document.querySelector("#login-form");
     const loginButton = document.querySelector("#login-button");
     const loginStatus = document.querySelector("#login-status");
+    const accountActions = document.querySelector("#account-actions");
+    const createAccountButton = document.querySelector("#create-account-button");
+    const createAccountHint = document.querySelector("#create-account-hint");
+    const signupForm = document.querySelector("#signup-form");
+    const signupSubmitButton = document.querySelector("#signup-submit-button");
+    const signupStatus = document.querySelector("#signup-status");
+    const backToLoginButton = document.querySelector("#back-to-login-button");
     const appHeader = document.querySelector("#app-header");
     const operatorApp = document.querySelector("#operator-app");
     const appFooter = document.querySelector("#app-footer");
     const logoutButton = document.querySelector("#logout-button");
+    const logoutStatus = document.querySelector("#logout-status");
     const chatForm = document.querySelector("#chat-form");
     const chatInput = document.querySelector("#chat-message");
     const chatButton = document.querySelector("#chat-button");
@@ -399,7 +429,13 @@
     function showLoginStatus(message, kind = "error") {
       loginStatus.textContent = message;
       loginStatus.className = `status ${kind}`;
-      loginStatus.hidden = false;
+      loginStatus.hidden = !message;
+    }
+
+    function showSignupStatus(message, kind = "error") {
+      signupStatus.textContent = message;
+      signupStatus.className = `status ${kind}`;
+      signupStatus.hidden = !message;
     }
 
     function showChatStatus(message, kind = "error") {
@@ -436,6 +472,14 @@
         const response = await fetch("/api/v1/auth/session");
         const result = await response.json();
         if (!response.ok) throw new Error(result.detail || "Could not check login status.");
+        createAccountButton.disabled = !result.configured || !result.signup_enabled;
+        createAccountHint.hidden = !createAccountButton.disabled;
+        if (!result.configured) {
+          createAccountHint.textContent = "Account creation requires server authentication to be configured.";
+        } else if (!result.signup_enabled) {
+          createAccountHint.textContent =
+            "Account creation is unavailable. An administrator must enable Firebase and configure an invitation code.";
+        }
         if (!result.configured) {
           showLoginStatus(
             "Login is not configured. Set APP_USERNAME, APP_PASSWORD, and APP_SECRET_KEY on the server.",
@@ -917,12 +961,65 @@
       }
     });
 
+    createAccountButton.addEventListener("click", () => {
+      if (createAccountButton.disabled) return;
+      loginForm.hidden = true;
+      accountActions.hidden = true;
+      signupForm.hidden = false;
+      showLoginStatus("");
+      showSignupStatus("");
+      signupForm.elements.username.focus();
+    });
+
+    backToLoginButton.addEventListener("click", () => {
+      signupForm.reset();
+      signupForm.hidden = true;
+      loginForm.hidden = false;
+      accountActions.hidden = false;
+      showSignupStatus("");
+      loginForm.elements.username.focus();
+    });
+
+    signupForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      signupSubmitButton.disabled = true;
+      showSignupStatus("");
+      try {
+        const response = await fetch("/api/v1/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: signupForm.elements.username.value,
+            password: signupForm.elements.password.value,
+            invite_code: signupForm.elements.invite_code.value,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Account creation failed.");
+        signupForm.reset();
+        showOperatorApp();
+      } catch (error) {
+        showSignupStatus(error.message);
+      } finally {
+        signupSubmitButton.disabled = false;
+      }
+    });
+
     logoutButton.addEventListener("click", async () => {
       stopLiveCamera();
+      logoutButton.disabled = true;
+      logoutStatus.hidden = true;
       try {
-        await fetch("/api/v1/auth/logout", { method: "POST" });
-      } finally {
+        const response = await fetch("/api/v1/auth/logout", { method: "POST" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Log out failed.");
         window.location.reload();
+      } catch (error) {
+        logoutStatus.textContent = error.message;
+        logoutStatus.className = "status error";
+        logoutStatus.hidden = false;
+      } finally {
+        logoutButton.disabled = false;
       }
     });
 
