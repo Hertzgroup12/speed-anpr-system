@@ -52,6 +52,7 @@ from app.auth import (
 from app.chatbot import MAX_MESSAGE_LENGTH, ask_gemini
 from app.config import get_settings
 from app.firebase_store import persist_events
+from app.location import extract_video_location
 from app.offenses import (
     create_offenses,
     list_offenses,
@@ -201,6 +202,7 @@ class AnalysisResponse(BaseModel):
     duration_seconds: float
     detected_at: str
     location: str
+    video_location: dict[str, float] | None
     speed_limit_kmh: float
     events: list[VehicleEvent]
     offenses_created: int
@@ -725,6 +727,10 @@ async def analyze(
         settings.max_upload_mb * 1024 * 1024,
     )
     try:
+        video_location = await run_in_threadpool(
+            extract_video_location,
+            video_path,
+        )
         form_data = await request.form()
         raw_location = form_data.get("location")
         if raw_location == "":
@@ -740,6 +746,12 @@ async def analyze(
             else location.strip()
         )
         camera_location = resolved_location
+        if video_location is not None:
+            camera_location = _location_with_coordinates(
+                camera_location,
+                video_location["latitude"],
+                video_location["longitude"],
+            )
         if not camera_location:
             raise HTTPException(
                 status_code=422,
@@ -774,11 +786,49 @@ async def analyze(
             **analysis,
             "detected_at": detected_at,
             "location": camera_location,
+            "video_location": video_location,
             "speed_limit_kmh": settings.speed_limit_kmh,
             "offenses_created": offenses_created,
             "firebase_enabled": settings.firebase_enabled,
             "events_persisted": events_persisted,
         }
+    finally:
+        if os.path.exists(video_path):
+            os.unlink(video_path)
+
+
+def _location_with_coordinates(
+    label: str,
+    latitude: float,
+    longitude: float,
+) -> str:
+    """Append coordinates while keeping the existing location field bounded."""
+    coordinates = f"GPS {latitude:.6f}, {longitude:.6f}"
+    suffix = f" · {coordinates}"
+    label_limit = max(0, 150 - len(suffix))
+    prefix = label[:label_limit].rstrip()
+    return f"{prefix}{suffix}" if prefix else coordinates
+
+
+@app.post("/api/v1/location/video")
+async def video_location(
+    video: Annotated[UploadFile, File(description="Video to inspect for GPS metadata")],
+) -> dict[str, Any]:
+    """Inspect an uploaded video for embedded ISO 6709 GPS coordinates."""
+    settings = get_settings()
+    if settings.max_upload_mb < 1:
+        raise HTTPException(
+            status_code=500,
+            detail="MAX_UPLOAD_MB must be configured as a positive integer",
+        )
+
+    video_path, _size = await _save_upload(
+        video,
+        settings.max_upload_mb * 1024 * 1024,
+    )
+    try:
+        location = await run_in_threadpool(extract_video_location, video_path)
+        return {"available": location is not None, "location": location}
     finally:
         if os.path.exists(video_path):
             os.unlink(video_path)
