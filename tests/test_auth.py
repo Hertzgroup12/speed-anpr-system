@@ -50,3 +50,18 @@ def test_session_rejects_expired_tokens(monkeypatch) -> None:
     monkeypatch.setattr(auth.time, "time", lambda: 1_000 + auth.SESSION_MAX_AGE_SECONDS)
 
     assert not verify_session_token(token, settings)
+
+
+def test_registered_user_session_is_valid_for_non_operator_username() -> None:
+    settings = Settings(
+        app_username="operator",
+        app_password="long-test-password",
+        app_secret_key="test-session-secret-that-is-long-enough",
+    )
+    token = create_session_token(
+        settings,
+        "registered@example.com",
+        registered_user=True,
+    )
+
+    assert verify_session_token(token, settings)

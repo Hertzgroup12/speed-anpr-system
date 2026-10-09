@@ -145,6 +145,26 @@ def test_login_cookie_is_http_only_and_strict() -> None:
     assert "samesite=strict" in cookie
 
 
+def test_registered_user_login_can_access_protected_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+
+    monkeypatch.setattr(main, "authenticate_registered_user", lambda *_args: True)
+    monkeypatch.setattr(main, "record_auth_event", lambda *_args: None)
+    registered_client = TestClient(app)
+    response = registered_client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": "registered@example.com",
+            "password": "a-long-test-password",
+        },
+    )
+
+    assert response.status_code == 200
+    assert registered_client.get("/api/v1/config").status_code == 200
+
+
 def test_successful_login_records_an_authentication_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

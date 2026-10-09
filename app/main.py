@@ -425,7 +425,11 @@ def login(request: Request, credentials: LoginRequest) -> JSONResponse:
     response = JSONResponse({"authenticated": True})
     response.set_cookie(
         SESSION_COOKIE,
-        create_session_token(settings, credentials.username),
+        create_session_token(
+            settings,
+            credentials.username,
+            registered_user=auth_method == "registered_account",
+        ),
         max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
         secure=_secure_session_cookie(request),
@@ -505,7 +509,7 @@ def signup(request: Request, credentials: SignupRequest) -> JSONResponse:
     )
     response.set_cookie(
         SESSION_COOKIE,
-        create_session_token(settings, username),
+        create_session_token(settings, username, registered_user=True),
         max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
         secure=_secure_session_cookie(request),

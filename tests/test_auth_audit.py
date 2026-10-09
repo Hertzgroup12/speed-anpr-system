@@ -8,8 +8,9 @@ from app.time_utils import GMT, gmt_now_iso
 
 
 class FakeDocument:
-    def __init__(self, identifier: str) -> None:
+    def __init__(self, identifier: str, collection_name: str) -> None:
         self.identifier = identifier
+        self.collection_name = collection_name
 
 
 class FakeCollection:
@@ -17,7 +18,7 @@ class FakeCollection:
         self.name = name
 
     def document(self, identifier: str | None = None) -> FakeDocument:
-        return FakeDocument(identifier or f"{self.name}-generated")
+        return FakeDocument(identifier or f"{self.name}-generated", self.name)
 
 
 class FakeBatch:
@@ -58,11 +59,11 @@ def test_registration_commits_account_and_gmt_signup_event_together(
     assert client.batch_instance.committed
     create, signup = client.batch_instance.operations
     assert create[0] == "create"
-    assert create[1].identifier.startswith(accounts.USER_COLLECTION)
+    assert create[1].collection_name == accounts.USER_COLLECTION
     assert create[2]["username"] == "new.user@example.com"
     assert "a-long-test-password" not in create[2].values()
     assert signup[0] == "set"
-    assert signup[1].identifier.startswith(settings.auth_audit_collection)
+    assert signup[1].collection_name == settings.auth_audit_collection
     assert signup[2]["username"] == "new.user@example.com"
     assert signup[2]["action"] == "signup"
     assert signup[2]["auth_method"] == "invite_code"
@@ -79,7 +80,10 @@ def test_login_audit_record_is_written_to_configured_collection(
 
     class RecordingCollection(FakeCollection):
         def document(self, identifier: str | None = None) -> RecordingDocument:
-            return RecordingDocument(identifier or f"{self.name}-generated")
+            return RecordingDocument(
+                identifier or f"{self.name}-generated",
+                self.name,
+            )
 
     class RecordingClient(FakeFirestore):
         def collection(self, name: str) -> RecordingCollection:

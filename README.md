@@ -93,7 +93,7 @@ The **Use device location** button requests browser geolocation only after the o
 
 The sign-in page offers **Create account** when `FIREBASE_ENABLED=true` and a 20-character-or-longer `ADMIN_INVITE_CODE` is configured. New accounts use an email address, a password of at least 12 characters, and the invitation code; account records are stored in Firestore. The configured operator account remains available for administration.
 
-Successful account creation and sign-in events are recorded in Firestore's `operator_auth_logs` collection (configurable with `AUTH_AUDIT_COLLECTION`) when Firebase is enabled. Each entry contains the normalized username, action, authentication method, and a human-readable GMT timestamp; no password, session token, or IP address is recorded. Account creation and its audit event are committed together. ISO timestamps elsewhere in stored records retain their `+00:00` offset, which is GMT.
+Successful account creation and sign-in events are recorded in Firestore's `operator_auth_logs` collection (configurable with `AUTH_AUDIT_COLLECTION`) when Firebase is enabled. View them in **Firebase Console → Firestore Database → Data → `operator_auth_logs`**. Each entry contains the normalized username, action, authentication method, and a human-readable GMT timestamp; no password, session token, or IP address is recorded. Account creation and its audit event are committed together. ISO timestamps elsewhere in stored records retain their `+00:00` offset, which is GMT.
 
 ### Firebase
 

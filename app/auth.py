@@ -37,13 +37,21 @@ def credentials_match(
     )
 
 
-def create_session_token(settings: Settings, username: str | None = None) -> str:
+def create_session_token(
+    settings: Settings,
+    username: str | None = None,
+    *,
+    registered_user: bool = False,
+) -> str:
     """Create a signed session token for the named operator."""
     if not auth_is_configured(settings):
         raise ValueError("Authentication is not configured")
     expires_at = int(time.time()) + SESSION_MAX_AGE_SECONDS
+    user_type = "registered" if registered_user else "operator"
     payload = base64.urlsafe_b64encode(
-        f"{username or settings.app_username}\n{expires_at}".encode("utf-8")
+        f"{user_type}\n{username or settings.app_username}\n{expires_at}".encode(
+            "utf-8"
+        )
     ).rstrip(b"=")
     signature = hmac.new(
         (settings.app_secret_key or "").encode("utf-8"),
@@ -75,11 +83,22 @@ def verify_session_token(token: str | None, settings: Settings) -> bool:
         decoded_payload = base64.urlsafe_b64decode(
             encoded_payload + "=" * (-len(encoded_payload) % 4)
         ).decode("utf-8")
-        username, expires_at = decoded_payload.rsplit("\n", maxsplit=1)
-        if not username or not secrets.compare_digest(
-            username,
-            settings.app_username or "",
+        fields = decoded_payload.split("\n")
+        if len(fields) == 2:
+            # Accept existing operator cookies until they expire.
+            username, expires_at = fields
+            user_type = "operator"
+        elif len(fields) == 3:
+            user_type, username, expires_at = fields
+        else:
+            return False
+        if not username:
+            return False
+        if user_type == "operator" and not secrets.compare_digest(
+            username, settings.app_username or ""
         ):
+            return False
+        if user_type not in {"operator", "registered"}:
             return False
         expires_at_epoch = int(expires_at)
         return expires_at_epoch > int(time.time())
