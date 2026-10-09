@@ -1,6 +1,6 @@
 """Tests for signed operator session cookies."""
 
-from app.auth import create_session_token, verify_session_token
+from app.auth import create_session_token, session_username, verify_session_token
 from app.config import Settings
 
 
@@ -13,6 +13,7 @@ def test_signed_session_is_valid_only_for_matching_secret_and_user() -> None:
     token = create_session_token(settings)
 
     assert verify_session_token(token, settings)
+    assert session_username(token, settings) == "operator"
     assert not verify_session_token(
         token,
         settings.model_copy(update={"app_secret_key": "different-secret-key-long-enough"}),

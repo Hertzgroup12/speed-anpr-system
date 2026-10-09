@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from app.accounts import user_id_for_username
 from app.config import Settings
 from app.firebase_store import _firestore_client
 from app.time_utils import gmt_now_iso
@@ -17,14 +18,31 @@ _CASES: dict[str, dict[str, Any]] = {}
 _CASES_LOCK = threading.Lock()
 
 
+def _default_owner_id(settings: Settings) -> str:
+    return user_id_for_username(settings.app_username or "operator")
+
+
+def _case_belongs_to_user(
+    case: dict[str, Any],
+    owner_id: str,
+    settings: Settings,
+) -> bool:
+    case_owner = case.get("owner_id")
+    if case_owner is None:
+        return owner_id == _default_owner_id(settings)
+    return case_owner == owner_id
+
+
 def create_offenses(
     events: list[dict[str, Any]],
     video_name: str,
     location: str,
     detected_at: str,
     settings: Settings,
+    owner_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Create review cases for estimates above the configured speed limit."""
+    owner_id = owner_id or _default_owner_id(settings)
     cases: list[dict[str, Any]] = []
     for event in events:
         if event["speed_kmh"] <= settings.speed_limit_kmh:
@@ -47,6 +65,7 @@ def create_offenses(
             "review_status": "pending_review",
             "notification_status": "not_sent",
             "created_at": gmt_now_iso(),
+            "owner_id": owner_id,
         }
         with _CASES_LOCK:
             _CASES[case["case_id"]] = case
@@ -60,8 +79,12 @@ def create_offenses(
     return cases
 
 
-def list_offenses(settings: Settings) -> list[dict[str, Any]]:
-    """Return saved cases, newest first, from Firestore or this demo process."""
+def list_offenses(
+    settings: Settings,
+    owner_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return the current user's saved cases, newest first."""
+    owner_id = owner_id or _default_owner_id(settings)
     if settings.firebase_enabled:
         documents = (
             _firestore_client(
@@ -71,10 +94,19 @@ def list_offenses(settings: Settings) -> list[dict[str, Any]]:
             .collection(settings.offense_collection)
             .stream()
         )
-        cases = [document.to_dict() for document in documents]
+        cases = [
+            case
+            for document in documents
+            if (case := document.to_dict()) is not None
+            and _case_belongs_to_user(case, owner_id, settings)
+        ]
     else:
         with _CASES_LOCK:
-            cases = [case.copy() for case in _CASES.values()]
+            cases = [
+                case.copy()
+                for case in _CASES.values()
+                if _case_belongs_to_user(case, owner_id, settings)
+            ]
     return sorted(cases, key=lambda case: case["created_at"], reverse=True)
 
 
@@ -82,8 +114,10 @@ def update_case_decision(
     case_id: str,
     decision: CaseDecision,
     settings: Settings,
+    owner_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Record a human review decision without changing the measured estimate."""
+    owner_id = owner_id or _default_owner_id(settings)
     if settings.firebase_enabled:
         reference = (
             _firestore_client(
@@ -96,39 +130,52 @@ def update_case_decision(
         snapshot = reference.get()
         if not snapshot.exists:
             return None
+        case = snapshot.to_dict()
+        if case is None or not _case_belongs_to_user(case, owner_id, settings):
+            return None
+        reviewed_at = gmt_now_iso()
         reference.update(
             {
                 "review_status": decision,
-                "reviewed_at": gmt_now_iso(),
+                "reviewed_at": reviewed_at,
             }
         )
-        case = snapshot.to_dict()
         case.update(
             {
                 "review_status": decision,
-                "reviewed_at": gmt_now_iso(),
+                "reviewed_at": reviewed_at,
             }
         )
         return case
 
     with _CASES_LOCK:
         case = _CASES.get(case_id)
-        if case is None:
+        if case is None or not _case_belongs_to_user(case, owner_id, settings):
             return None
         case["review_status"] = decision
         case["reviewed_at"] = gmt_now_iso()
         return case.copy()
 
 
-def notify_driver(case_id: str, settings: Settings) -> dict[str, Any]:
+def notify_driver(
+    case_id: str,
+    settings: Settings,
+    owner_id: str | None = None,
+) -> dict[str, Any]:
     """Send a reviewed case alert, or record a simulation without contacting anyone."""
+    owner_id = owner_id or _default_owner_id(settings)
     if settings.firebase_enabled:
-        cases = list_offenses(settings)
+        cases = list_offenses(settings, owner_id)
         case = next((item for item in cases if item["case_id"] == case_id), None)
     else:
         with _CASES_LOCK:
             saved_case = _CASES.get(case_id)
-            case = saved_case.copy() if saved_case else None
+            case = (
+                saved_case.copy()
+                if saved_case
+                and _case_belongs_to_user(saved_case, owner_id, settings)
+                else None
+            )
 
     if case is None:
         raise KeyError("Offense case was not found")
@@ -168,13 +215,36 @@ def notify_driver(case_id: str, settings: Settings) -> dict[str, Any]:
         )
     else:
         with _CASES_LOCK:
-            _CASES[case_id].update(update)
+            saved_case = _CASES.get(case_id)
+            if saved_case is None or not _case_belongs_to_user(
+                saved_case,
+                owner_id,
+                settings,
+            ):
+                raise KeyError("Offense case was not found")
+            saved_case.update(update)
 
     return {
         "case_id": case_id,
         "notification_status": status,
         "simulation": settings.sms_simulation,
     }
+
+
+def capture_belongs_to_user(
+    capture_id: str,
+    settings: Settings,
+    owner_id: str,
+) -> bool:
+    """Check that a capture is referenced by one of this user's review cases."""
+    return any(
+        capture_id
+        in {
+            case.get("vehicle_capture_id"),
+            case.get("plate_capture_id"),
+        }
+        for case in list_offenses(settings, owner_id)
+    )
 
 
 def _send_africastalking_sms(

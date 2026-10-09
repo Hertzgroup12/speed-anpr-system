@@ -85,7 +85,7 @@ Copy the generated value into the ignored local `.env` as `APP_SECRET_KEY`, and 
 
 To enable the AI assistant, create a Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey) and set `GEMINI_API_KEY` in the server environment. The key stays server-side. The assistant accepts up to 2,000 characters per request, allows 10 requests per minute per process, and does not receive dashboard cases or plate data automatically. Gemini calls use stateless requests (`store=false`); do not enter plate numbers or personal information in chat. Google API usage and quotas may apply.
 
-The configured operator account is shared; invite-created accounts are individual logins but currently receive the same operator permissions. Use a unique strong password, keep the app private where possible, and rotate credentials if they may have been exposed.
+The configured operator and each invite-created account have separate workspaces. Review cases, captured images, and account-specific review thresholds and camera defaults are visible only to the account that created them. The dashboard also has an account-specific dark-mode switch, saved in that browser. The configured operator remains the administrator for server configuration, but does not automatically see other users' workspace data. Use a unique strong password, keep the app private where possible, and rotate credentials if they may have been exposed.
 
 The **Use device location** button requests browser geolocation only after the operator clicks it; browsers require HTTPS or localhost and location permission. Live-event locations include the coordinates when permission is granted, otherwise the manually configured camera location is used. Coordinates are sent to the server and included with live detections (and stored with event records when Firebase is enabled).
 
@@ -93,15 +93,17 @@ The **Use device location** button requests browser geolocation only after the o
 
 The sign-in page offers **Create account** when `FIREBASE_ENABLED=true` and a 20-character-or-longer `ADMIN_INVITE_CODE` is configured. New accounts use an email address, a password of at least 12 characters, and the invitation code; account records are stored in Firestore. The configured operator account remains available for administration.
 
+Each account's review threshold and default camera location are saved in Firestore's `operator_preferences` collection when Firebase is enabled. Cases and analyzed event records include an opaque account owner ID so the dashboard can enforce the workspace boundary without storing the user's email on each record.
+
 Successful account creation and sign-in events are recorded in Firestore's `operator_auth_logs` collection (configurable with `AUTH_AUDIT_COLLECTION`) when Firebase is enabled. View them in **Firebase Console → Firestore Database → Data → `operator_auth_logs`**. Each entry contains the normalized username, action, authentication method, and a human-readable GMT timestamp; no password, session token, or IP address is recorded. Account creation and its audit event are committed together. ISO timestamps elsewhere in stored records retain their `+00:00` offset, which is GMT.
 
 ### Firebase
 
-Enable Firestore and set `FIREBASE_ENABLED=true`, `FIREBASE_PROJECT_ID`, and either `FIREBASE_CREDENTIALS` or Application Default Credentials. The web dashboard reads cases from Firestore when enabled. When it is disabled, cases are held in memory and disappear when the server restarts.
+Enable Firestore and set `FIREBASE_ENABLED=true`, `FIREBASE_PROJECT_ID`, and either `FIREBASE_CREDENTIALS` or Application Default Credentials. The web dashboard reads user-owned cases and account preferences from Firestore when enabled. When it is disabled, cases and preferences are held in memory and disappear when the server restarts.
 
 To enable Firebase Analytics in the dashboard, register a **Web app** in Firebase, enable Google Analytics for the project, and copy its web configuration into `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_APP_ID`, and `FIREBASE_MEASUREMENT_ID` in the server environment. The existing `FIREBASE_PROJECT_ID` is reused. Analytics initializes automatically after a user signs in and the browser supports it. These web configuration values are public client identifiers, not service-account secrets; continue to keep `FIREBASE_CREDENTIALS` private. The browser loads the Firebase 13.0.0 modular SDK from Google's `gstatic` CDN.
 
-Vehicle and plate images are stored locally in `CAPTURE_DIRECTORY`, not Firebase Storage. Back up and protect that folder separately if image retention is required.
+Vehicle and plate images are stored locally in `CAPTURE_DIRECTORY`, not Firebase Storage. Image access is checked against the signed-in user's cases. Back up and protect that folder separately if image retention is required.
 
 ### Driver lookup and SMS
 
@@ -111,11 +113,11 @@ By default, notifications are simulated and no SMS is sent. For a demo, add test
 DRIVER_DIRECTORY={"TEST1234":"+233200000000"}
 ```
 
-The notice action is available only after a case is marked reviewed, requires an explicit dashboard action, and cannot be repeated for the same case. To enable live Africa's Talking requests, configure valid account credentials and set `SMS_SIMULATION=false`. Live sends are billable and may reach real recipients; test with numbers you control and obtain any required consent first. The application has no authentication, so do not expose it to the public internet.
+The notice action is available only after a case is marked reviewed, requires an explicit dashboard action, and cannot be repeated for the same case. To enable live Africa's Talking requests, configure valid account credentials and set `SMS_SIMULATION=false`. Live sends are billable and may reach real recipients; test with numbers you control and obtain any required consent first. Keep the application private where possible and configure strong operator credentials before exposing it to a network.
 
 ## Deploy to Google Cloud Run
 
-This app has no sign-in or authorization. Deploy it as a **private Cloud Run service**; do not allow unauthenticated/public access to footage, plate data, or case actions. The container uses Cloud Run's `PORT` setting and loads Firebase Admin credentials from the Cloud Run service identity (Application Default Credentials), so no service-account JSON key needs to be uploaded.
+Deploy it as a **private Cloud Run service** and do not allow unauthenticated/public access to footage, plate data, or case actions. The container uses Cloud Run's `PORT` setting and loads Firebase Admin credentials from the Cloud Run service identity (Application Default Credentials), so no service-account JSON key needs to be uploaded.
 
 1. Push the project to GitHub, making sure `.env` and all service-account JSON files remain untracked.
 2. In [Google Cloud Shell](https://console.cloud.google.com/?cloudshell=true), clone the repository and enter its directory:

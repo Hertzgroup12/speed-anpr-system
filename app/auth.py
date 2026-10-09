@@ -1,4 +1,4 @@
-"""Signed, short-lived browser sessions for the single-operator dashboard."""
+"""Signed, short-lived browser sessions for dashboard accounts."""
 
 import base64
 import binascii
@@ -62,10 +62,10 @@ def create_session_token(
     return f"{payload.decode('ascii')}.{encoded_signature.decode('ascii')}"
 
 
-def verify_session_token(token: str | None, settings: Settings) -> bool:
-    """Validate the signature, configured user, and expiry of a session."""
+def session_username(token: str | None, settings: Settings) -> str | None:
+    """Return the username from a valid signed session, or None."""
     if not token or not auth_is_configured(settings):
-        return False
+        return None
     try:
         encoded_payload, encoded_signature = token.split(".", maxsplit=1)
         payload = encoded_payload.encode("ascii")
@@ -78,7 +78,7 @@ def verify_session_token(token: str | None, settings: Settings) -> bool:
             hashlib.sha256,
         ).digest()
         if not hmac.compare_digest(supplied_signature, expected_signature):
-            return False
+            return None
 
         decoded_payload = base64.urlsafe_b64decode(
             encoded_payload + "=" * (-len(encoded_payload) % 4)
@@ -91,16 +91,21 @@ def verify_session_token(token: str | None, settings: Settings) -> bool:
         elif len(fields) == 3:
             user_type, username, expires_at = fields
         else:
-            return False
+            return None
         if not username:
-            return False
+            return None
         if user_type == "operator" and not secrets.compare_digest(
             username, settings.app_username or ""
         ):
-            return False
+            return None
         if user_type not in {"operator", "registered"}:
-            return False
+            return None
         expires_at_epoch = int(expires_at)
-        return expires_at_epoch > int(time.time())
+        return username if expires_at_epoch > int(time.time()) else None
     except (binascii.Error, ValueError, UnicodeDecodeError):
-        return False
+        return None
+
+
+def verify_session_token(token: str | None, settings: Settings) -> bool:
+    """Validate the signature, configured user, and expiry of a session."""
+    return session_username(token, settings) is not None

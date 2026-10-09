@@ -15,10 +15,55 @@
       text-rendering: optimizeLegibility;
     }
 
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      color: #e2e8f0;
+      background: #0f172a;
+    }
+
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
 
     body { margin: 0; min-width: 320px; }
+
+    :root[data-theme="dark"] body { background: #0f172a; }
+
+    :root[data-theme="dark"] .panel {
+      border-color: #334155;
+      background: #1e293b;
+      box-shadow: 0 3px 12px rgb(0 0 0 / 20%);
+    }
+
+    :root[data-theme="dark"] .hint,
+    :root[data-theme="dark"] .file-help,
+    :root[data-theme="dark"] .summary,
+    :root[data-theme="dark"] th,
+    :root[data-theme="dark"] .empty-row {
+      color: #b6c3d1;
+    }
+
+    :root[data-theme="dark"] input,
+    :root[data-theme="dark"] select,
+    :root[data-theme="dark"] textarea {
+      border-color: #526276;
+      background: #111c2e;
+      color: #e2e8f0;
+    }
+
+    :root[data-theme="dark"] .status { background: #263449; }
+    :root[data-theme="dark"] .status.error { color: #fecaca; background: #512b36; }
+    :root[data-theme="dark"] .status.success { color: #bbf7d0; background: #1b4335; }
+    :root[data-theme="dark"] td,
+    :root[data-theme="dark"] th { border-bottom-color: #334155; }
+    :root[data-theme="dark"] .location-result a,
+    :root[data-theme="dark"] footer a { color: #7dc4ff; }
+    :root[data-theme="dark"] .case-actions .dismiss { color: #fecaca; background: #512b36; }
+    :root[data-theme="dark"] .case-actions .dismiss:hover:not(:disabled) { background: #673642; }
+    :root[data-theme="dark"] .chat-log { background: #111c2e; }
+    :root[data-theme="dark"] .chat-message { background: #263449; }
+    :root[data-theme="dark"] .chat-message.user { background: #1b3b5b; }
+    :root[data-theme="dark"] .chat-disabled { color: #fecaca; }
+    :root[data-theme="dark"] footer { color: #b6c3d1; }
 
     header {
       padding: 28px max(24px, calc((100% - 1080px) / 2));
@@ -152,6 +197,8 @@
     }
     .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     .app-bar button { min-height: 38px; padding: 8px 14px; }
+    .app-bar-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+    .account-name { margin: 8px 0 0; color: #d9e2ec; overflow-wrap: anywhere; }
     #logout-status { margin: 10px 0 0; }
     .chat-log {
       display: grid;
@@ -230,12 +277,33 @@
     <h1>JNRD PRO</h1>
     <p>Upload a traffic video to detect vehicles, estimate their speed, and read visible number plates.</p>
       </div>
-      <button id="logout-button" type="button">Log out</button>
+      <div class="app-bar-actions">
+        <button id="theme-toggle" type="button" aria-pressed="false">Dark mode: Off</button>
+        <button id="logout-button" type="button">Log out</button>
+      </div>
     </div>
+    <p id="account-name" class="account-name"></p>
     <p id="logout-status" class="status" role="status" aria-live="polite" hidden></p>
   </header>
 
   <main id="operator-app" hidden>
+    <section class="panel" aria-labelledby="personal-settings-heading">
+      <h2 id="personal-settings-heading">My workspace settings</h2>
+      <p class="hint">These defaults and review threshold are private to your account.</p>
+      <form id="personal-settings-form">
+        <div class="fields">
+          <label for="personal-speed-limit">My review threshold (km/h)
+            <input id="personal-speed-limit" name="speed_limit_kmh" type="number" min="0.01" max="300" step="any" required>
+          </label>
+          <label for="personal-camera-location">My default camera location
+            <input id="personal-camera-location" name="camera_location" type="text" maxlength="150" required>
+          </label>
+        </div>
+        <button id="save-personal-settings" type="submit">Save my settings</button>
+        <p id="personal-settings-status" class="status" role="status" aria-live="polite" hidden></p>
+      </form>
+    </section>
+
     <section class="panel" aria-labelledby="upload-heading">
       <h2 id="upload-heading">Analyze a video</h2>
       <p id="system-settings" class="summary" role="status">Loading system settings…</p>
@@ -416,6 +484,11 @@
     const appFooter = document.querySelector("#app-footer");
     const logoutButton = document.querySelector("#logout-button");
     const logoutStatus = document.querySelector("#logout-status");
+    const themeToggle = document.querySelector("#theme-toggle");
+    const accountName = document.querySelector("#account-name");
+    const personalSettingsForm = document.querySelector("#personal-settings-form");
+    const personalSettingsStatus = document.querySelector("#personal-settings-status");
+    const savePersonalSettingsButton = document.querySelector("#save-personal-settings");
     const chatForm = document.querySelector("#chat-form");
     const chatInput = document.querySelector("#chat-message");
     const chatButton = document.querySelector("#chat-button");
@@ -429,6 +502,19 @@
     let currentDeviceLocation = null;
     let selectedVideoLocation = null;
     let firebaseAnalyticsInitialization = null;
+    let dashboardConfig = null;
+    let currentThemeKey = null;
+
+    function setTheme(isDark) {
+      document.documentElement.dataset.theme = isDark ? "dark" : "light";
+      themeToggle.setAttribute("aria-pressed", String(isDark));
+      themeToggle.textContent = `Dark mode: ${isDark ? "On" : "Off"}`;
+    }
+
+    function loadTheme(username) {
+      currentThemeKey = `jnrd-theme:${username}`;
+      setTheme(localStorage.getItem(currentThemeKey) === "dark");
+    }
 
     function formatCoordinates(location) {
       return `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`;
@@ -571,11 +657,13 @@
       chatStatus.hidden = !message;
     }
 
-    function showOperatorApp() {
+    function showOperatorApp(username) {
+      loadTheme(username);
       loginPanel.hidden = true;
       appHeader.hidden = false;
       operatorApp.hidden = false;
       appFooter.hidden = false;
+      accountName.textContent = `Signed in as ${username}`;
       refreshOffenses().catch((error) => {
         offensesBody.replaceChildren();
         const row = document.createElement("tr");
@@ -642,7 +730,7 @@
           return;
         }
         if (result.authenticated) {
-          showOperatorApp();
+          showOperatorApp(result.username);
         }
       } catch (error) {
         showLoginStatus(error.message);
@@ -898,9 +986,13 @@
       const response = await fetch("/api/v1/config");
       const settings = await response.json();
       if (!response.ok) throw new Error(settings.detail || "Could not load settings.");
+      dashboardConfig = settings;
+      personalSettingsForm.elements.speed_limit_kmh.value = settings.speed_limit_kmh;
+      personalSettingsForm.elements.camera_location.value = settings.camera_location;
+      form.elements.location.value = settings.camera_location;
       systemSettings.textContent =
-        `Review threshold: ${settings.speed_limit_kmh} km/h · ` +
-        `Camera: ${settings.camera_location} · ` +
+        `Your review threshold: ${settings.speed_limit_kmh} km/h · ` +
+        `Your default camera: ${settings.camera_location} · ` +
         `SMS: ${settings.sms_simulation ? "simulation only" : "live sending enabled"} · ` +
         `Firestore: ${settings.firebase_enabled ? "enabled" : "in-memory demo"}`;
       return settings;
@@ -1112,6 +1204,49 @@
       videoLocationStatus.replaceChildren();
     });
 
+    themeToggle.addEventListener("click", () => {
+      const isDark = document.documentElement.dataset.theme !== "dark";
+      setTheme(isDark);
+      localStorage.setItem(currentThemeKey, isDark ? "dark" : "light");
+    });
+
+    personalSettingsForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      savePersonalSettingsButton.disabled = true;
+      personalSettingsStatus.hidden = true;
+      try {
+        const response = await fetch("/api/v1/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            speed_limit_kmh: Number(personalSettingsForm.elements.speed_limit_kmh.value),
+            camera_location: personalSettingsForm.elements.camera_location.value.trim(),
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Could not save your settings.");
+        personalSettingsForm.elements.speed_limit_kmh.value = result.settings.speed_limit_kmh;
+        personalSettingsForm.elements.camera_location.value = result.settings.camera_location;
+        form.elements.location.value = result.settings.camera_location;
+        dashboardConfig.speed_limit_kmh = result.settings.speed_limit_kmh;
+        dashboardConfig.camera_location = result.settings.camera_location;
+        systemSettings.textContent =
+          `Your review threshold: ${result.settings.speed_limit_kmh} km/h · ` +
+          `Your default camera: ${result.settings.camera_location} · ` +
+          `SMS: ${dashboardConfig.sms_simulation ? "simulation only" : "live sending enabled"} · ` +
+          `Firestore: ${dashboardConfig.firebase_enabled ? "enabled" : "in-memory demo"}`;
+        personalSettingsStatus.textContent = "Your settings have been saved.";
+        personalSettingsStatus.className = "status success";
+        personalSettingsStatus.hidden = false;
+      } catch (error) {
+        personalSettingsStatus.textContent = error.message;
+        personalSettingsStatus.className = "status error";
+        personalSettingsStatus.hidden = false;
+      } finally {
+        savePersonalSettingsButton.disabled = false;
+      }
+    });
+
     loginForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       loginButton.disabled = true;
@@ -1128,7 +1263,7 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.detail || "Sign-in failed.");
         loginForm.reset();
-        showOperatorApp();
+        showOperatorApp(result.username);
       } catch (error) {
         showLoginStatus(error.message);
       } finally {
@@ -1172,7 +1307,7 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.detail || "Account creation failed.");
         signupForm.reset();
-        showOperatorApp();
+        showOperatorApp(result.username);
       } catch (error) {
         showSignupStatus(error.message);
       } finally {

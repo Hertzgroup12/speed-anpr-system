@@ -31,6 +31,7 @@ from app.accounts import (
     authenticate_registered_user,
     invite_code_matches,
     register_user,
+    user_id_for_username,
     valid_signup_username,
 )
 from app.analyzer import (
@@ -46,6 +47,7 @@ from app.auth import (
     auth_is_configured,
     create_session_token,
     credentials_match,
+    session_username,
     verify_session_token,
 )
 from app.chatbot import MAX_MESSAGE_LENGTH, ask_gemini
@@ -53,12 +55,14 @@ from app.config import get_settings
 from app.firebase_store import persist_events, record_auth_event
 from app.location import extract_video_location
 from app.offenses import (
+    capture_belongs_to_user,
     create_offenses,
     list_offenses,
     notify_driver,
     update_case_decision,
 )
 from app.time_utils import gmt_now_iso
+from app.user_settings import get_user_settings, save_user_settings
 
 ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -96,6 +100,13 @@ def _secure_session_cookie(request: Request) -> bool:
     )
 
 
+def _authenticated_username(request: Request, settings: Any) -> str:
+    username = session_username(request.cookies.get(SESSION_COOKIE), settings)
+    if username is None:
+        raise HTTPException(status_code=401, detail="Please sign in to continue")
+    return username
+
+
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=256)
@@ -109,6 +120,11 @@ class SignupRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
+
+
+class UserSettingsUpdate(BaseModel):
+    speed_limit_kmh: float | None = Field(default=None, gt=0, le=300)
+    camera_location: str | None = Field(default=None, min_length=1, max_length=150)
 
 
 class VehicleEvent(BaseModel):
@@ -231,12 +247,14 @@ def _record_events(
     location: str,
     detected_at: str,
     settings: Any,
+    owner_id: str,
 ) -> tuple[int, int]:
     """Attach review cases and storage metadata to events from either input mode."""
     metadata = {
         "location": location,
         "detected_at": detected_at,
         "speed_limit_kmh": settings.speed_limit_kmh,
+        "owner_id": owner_id,
     }
     for event in events:
         event["offense"] = event["speed_kmh"] > settings.speed_limit_kmh
@@ -258,6 +276,7 @@ def _record_events(
         location,
         detected_at,
         settings,
+        owner_id,
     )
     case_by_track = {case["track_id"]: case["case_id"] for case in offense_cases}
     for event in events:
@@ -312,9 +331,11 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/v1/config")
-def public_config() -> dict[str, Any]:
-    """Expose non-secret settings that help an operator interpret the dashboard."""
+def public_config(request: Request) -> dict[str, Any]:
+    """Expose safe server configuration and the signed-in user's preferences."""
     settings = get_settings()
+    username = _authenticated_username(request, settings)
+    preferences = get_user_settings(username, settings)
     firebase_analytics_config = None
     if all(
         (
@@ -333,8 +354,8 @@ def public_config() -> dict[str, Any]:
             "measurementId": settings.firebase_measurement_id,
         }
     return {
-        "speed_limit_kmh": settings.speed_limit_kmh,
-        "camera_location": settings.camera_location,
+        **preferences,
+        "username": username,
         "sms_simulation": settings.sms_simulation,
         "firebase_enabled": settings.firebase_enabled,
         "firebase_analytics_config": firebase_analytics_config,
@@ -343,15 +364,14 @@ def public_config() -> dict[str, Any]:
 
 
 @app.get("/api/v1/auth/session")
-def auth_session(request: Request) -> dict[str, bool]:
+def auth_session(request: Request) -> dict[str, Any]:
     """Tell the login page whether credentials and a valid session are present."""
     settings = get_settings()
+    username = session_username(request.cookies.get(SESSION_COOKIE), settings)
     return {
         "configured": auth_is_configured(settings),
-        "authenticated": verify_session_token(
-            request.cookies.get(SESSION_COOKIE),
-            settings,
-        ),
+        "authenticated": username is not None,
+        "username": username,
         "signup_enabled": bool(
             settings.firebase_enabled
             and settings.admin_invite_code
@@ -360,9 +380,39 @@ def auth_session(request: Request) -> dict[str, bool]:
     }
 
 
+@app.put("/api/v1/settings")
+def update_user_settings(
+    request: Request,
+    update: UserSettingsUpdate,
+) -> dict[str, Any]:
+    """Save camera defaults and the review threshold for the signed-in account."""
+    username = _authenticated_username(request, get_settings())
+    updates = update.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(
+            status_code=422,
+            detail="At least one personal setting must be supplied",
+        )
+    if "camera_location" in updates:
+        updates["camera_location"] = updates["camera_location"].strip()
+        if not updates["camera_location"]:
+            raise HTTPException(
+                status_code=422,
+                detail="Camera location must not be empty",
+            )
+    try:
+        preferences = save_user_settings(username, updates, get_settings())
+    except GoogleAPICallError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Personal settings service is temporarily unavailable",
+        ) from error
+    return {"settings": preferences}
+
+
 @app.post("/api/v1/auth/login")
 def login(request: Request, credentials: LoginRequest) -> JSONResponse:
-    """Authenticate the single configured operator and set an HTTP-only cookie."""
+    """Authenticate an operator account and set an HTTP-only session cookie."""
     settings = get_settings()
     if not auth_is_configured(settings):
         raise HTTPException(
@@ -422,7 +472,9 @@ def login(request: Request, credentials: LoginRequest) -> JSONResponse:
 
     with _LOGIN_ATTEMPTS_LOCK:
         _LOGIN_ATTEMPTS.pop(client_host, None)
-    response = JSONResponse({"authenticated": True})
+    response = JSONResponse(
+        {"authenticated": True, "username": credentials.username}
+    )
     response.set_cookie(
         SESSION_COOKIE,
         create_session_token(
@@ -534,9 +586,9 @@ def logout(request: Request) -> JSONResponse:
 
 
 @app.post("/api/v1/chat")
-async def chat(request: ChatRequest) -> dict[str, str]:
+async def chat(request: Request, chat_request: ChatRequest) -> dict[str, str]:
     """Answer a bounded operator question without sending case data to Gemini."""
-    message = request.message.strip()
+    message = chat_request.message.strip()
     if not message:
         raise HTTPException(status_code=422, detail="Message must not be empty")
     if len(message) > MAX_MESSAGE_LENGTH:
@@ -544,10 +596,11 @@ async def chat(request: ChatRequest) -> dict[str, str]:
             status_code=422,
             detail=f"Message must be at most {MAX_MESSAGE_LENGTH} characters",
         )
+    username = _authenticated_username(request, get_settings())
     now = time.monotonic()
     with _CHAT_REQUESTS_LOCK:
         recent_requests = _CHAT_REQUESTS.setdefault(
-            get_settings().app_username or "operator",
+            user_id_for_username(username),
             deque(),
         )
         while recent_requests and now - recent_requests[0] >= 60:
@@ -573,39 +626,65 @@ def web_app() -> FileResponse:
 
 
 @app.get("/api/v1/captures/{capture_id}.jpg", include_in_schema=False)
-def get_capture(capture_id: str) -> FileResponse:
-    """Serve a locally retained image using its random capture identifier."""
+def get_capture(capture_id: str, request: Request) -> FileResponse:
+    """Serve a locally retained image only to the account that owns its case."""
     if not re.fullmatch(r"[a-f0-9]{32}", capture_id):
         raise HTTPException(status_code=404, detail="Capture not found")
-    capture_path = Path(get_settings().capture_directory) / f"{capture_id}.jpg"
+    settings = get_settings()
+    username = _authenticated_username(request, settings)
+    if not capture_belongs_to_user(
+        capture_id,
+        settings,
+        user_id_for_username(username),
+    ):
+        raise HTTPException(status_code=404, detail="Capture not found")
+    capture_path = Path(settings.capture_directory) / f"{capture_id}.jpg"
     if not capture_path.is_file():
         raise HTTPException(status_code=404, detail="Capture not found")
     return FileResponse(capture_path, media_type="image/jpeg")
 
 
 @app.get("/api/v1/offenses")
-def offenses() -> dict[str, Any]:
-    """List speed-estimate cases for the operator dashboard."""
-    return {"offenses": list_offenses(get_settings())}
+def offenses(request: Request) -> dict[str, Any]:
+    """List speed-estimate cases belonging to the signed-in account."""
+    settings = get_settings()
+    username = _authenticated_username(request, settings)
+    return {
+        "offenses": list_offenses(settings, user_id_for_username(username))
+    }
 
 
 @app.patch("/api/v1/offenses/{case_id}")
 def review_offense(
     case_id: str,
     request: ReviewDecisionRequest,
+    http_request: Request,
 ) -> dict[str, Any]:
     """Require an operator to review or dismiss a speed-estimate case."""
-    case = update_case_decision(case_id, request.decision, get_settings())
+    settings = get_settings()
+    username = _authenticated_username(http_request, settings)
+    case = update_case_decision(
+        case_id,
+        request.decision,
+        settings,
+        user_id_for_username(username),
+    )
     if case is None:
         raise HTTPException(status_code=404, detail="Offense case not found")
     return {"offense": case}
 
 
 @app.post("/api/v1/offenses/{case_id}/notify")
-def send_driver_notice(case_id: str) -> dict[str, Any]:
+def send_driver_notice(case_id: str, request: Request) -> dict[str, Any]:
     """Simulate or manually send a notice only after a case is reviewed."""
+    settings = get_settings()
+    username = _authenticated_username(request, settings)
     try:
-        return notify_driver(case_id, get_settings())
+        return notify_driver(
+            case_id,
+            settings,
+            user_id_for_username(username),
+        )
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except LookupError as error:
@@ -623,12 +702,16 @@ async def live_camera(websocket: WebSocket) -> None:
     if origin and urlsplit(origin).netloc != websocket.headers.get("host"):
         await websocket.close(code=4403, reason="Cross-origin connection denied")
         return
-    if not verify_session_token(
+    settings = get_settings()
+    username = session_username(
         websocket.cookies.get(SESSION_COOKIE),
-        get_settings(),
-    ):
+        settings,
+    )
+    if username is None:
         await websocket.close(code=4401, reason="Sign in required")
         return
+    owner_id = user_id_for_username(username)
+    settings = settings.model_copy(update=get_user_settings(username, settings))
 
     await websocket.accept()
     lock_acquired = False
@@ -645,7 +728,6 @@ async def live_camera(websocket: WebSocket) -> None:
             await websocket.close(code=4400)
             return
 
-        settings = get_settings()
         if settings.max_upload_mb < 1:
             await websocket.send_json(
                 {"type": "error", "detail": "The server upload limit is misconfigured"}
@@ -717,6 +799,7 @@ async def live_camera(websocket: WebSocket) -> None:
                     camera_config.location,
                     detected_at,
                     settings,
+                    owner_id,
                 )
                 await websocket.send_json(
                     {
@@ -756,6 +839,10 @@ async def analyze(
         )
 
     settings = get_settings()
+    username = _authenticated_username(request, settings)
+    owner_id = user_id_for_username(username)
+    preferences = get_user_settings(username, settings)
+    settings = settings.model_copy(update=preferences)
     if settings.max_upload_mb < 1:
         raise HTTPException(
             status_code=500,
@@ -819,6 +906,7 @@ async def analyze(
             camera_location,
             detected_at,
             settings,
+            owner_id,
         )
 
         return {

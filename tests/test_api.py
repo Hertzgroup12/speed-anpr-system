@@ -52,6 +52,9 @@ def test_homepage_serves_the_browser_app() -> None:
     assert 'id="signup-form"' in response.text
     assert 'fetch("/api/v1/auth/signup"' in response.text
     assert 'id="logout-button"' in response.text
+    assert 'id="theme-toggle"' in response.text
+    assert 'aria-pressed="false"' in response.text
+    assert 'localStorage.setItem(currentThemeKey' in response.text
     assert 'id="inspect-video-location"' in response.text
     assert 'fetch("/api/v1/location/video"' in response.text
     assert "navigator.geolocation.getCurrentPosition" in response.text
@@ -446,7 +449,14 @@ def test_analyze_uses_embedded_video_coordinates_for_recorded_location(
     )
     recorded = {}
 
-    def record_events(_events, _source, location, _detected_at, _settings):
+    def record_events(
+        _events,
+        _source,
+        location,
+        _detected_at,
+        _settings,
+        _owner_id,
+    ):
         recorded["location"] = location
         return 0, 0
 
@@ -472,6 +482,91 @@ def test_analyze_uses_embedded_video_coordinates_for_recorded_location(
         "Roadside camera · GPS 37.421998, -122.084000"
     )
     assert recorded["location"] == response.json()["location"]
+
+
+def test_accounts_have_private_settings_cases_and_captures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+    from app.accounts import user_id_for_username
+    from app.offenses import create_offenses
+
+    monkeypatch.setattr(main, "authenticate_registered_user", lambda *_args: True)
+    monkeypatch.setattr(main, "record_auth_event", lambda *_args: None)
+    settings = main.get_settings()
+    registered_username = "private.workspace@example.com"
+    registered_user_id = user_id_for_username(registered_username)
+    operator_user_id = user_id_for_username(settings.app_username or "")
+    registered_client = TestClient(app)
+    login = registered_client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": registered_username,
+            "password": "a-long-test-password",
+        },
+    )
+    assert login.status_code == 200
+
+    saved_settings = registered_client.put(
+        "/api/v1/settings",
+        json={
+            "speed_limit_kmh": 37,
+            "camera_location": "Registered user's road",
+        },
+    )
+    assert saved_settings.status_code == 200
+    assert saved_settings.json()["settings"] == {
+        "speed_limit_kmh": 37,
+        "camera_location": "Registered user's road",
+    }
+    assert registered_client.get("/api/v1/config").json()["username"] == registered_username
+    assert client.get("/api/v1/config").json()["camera_location"] == settings.camera_location
+
+    event = {
+        "track_id": 1,
+        "plate_number": "TEST1234",
+        "plate_confidence": 0.9,
+        "speed_kmh": settings.speed_limit_kmh + 1,
+        "timestamp_seconds": 1.5,
+        "vehicle_capture_id": "c" * 32,
+        "plate_capture_id": None,
+    }
+    operator_case = create_offenses(
+        [event.copy()],
+        "operator.mp4",
+        "Operator road",
+        "2026-01-01T00:00:00+00:00",
+        settings,
+        operator_user_id,
+    )[0]
+    registered_event = {**event, "vehicle_capture_id": "d" * 32}
+    registered_case = create_offenses(
+        [registered_event],
+        "registered.mp4",
+        "Registered road",
+        "2026-01-01T00:00:00+00:00",
+        settings,
+        registered_user_id,
+    )[0]
+
+    operator_cases = client.get("/api/v1/offenses").json()["offenses"]
+    registered_cases = registered_client.get("/api/v1/offenses").json()["offenses"]
+    assert operator_case["case_id"] in {case["case_id"] for case in operator_cases}
+    assert registered_case["case_id"] not in {case["case_id"] for case in operator_cases}
+    assert registered_case["case_id"] in {
+        case["case_id"] for case in registered_cases
+    }
+    assert operator_case["case_id"] not in {
+        case["case_id"] for case in registered_cases
+    }
+
+    assert client.patch(
+        f"/api/v1/offenses/{registered_case['case_id']}",
+        json={"decision": "reviewed"},
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/captures/{registered_event['vehicle_capture_id']}.jpg"
+    ).status_code == 404
 
 
 def test_analyze_rejects_equal_measurement_lines() -> None:

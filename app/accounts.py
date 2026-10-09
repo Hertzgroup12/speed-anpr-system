@@ -20,6 +20,11 @@ def normalize_username(username: str) -> str:
     return username.strip().casefold()
 
 
+def user_id_for_username(username: str) -> str:
+    """Return a stable opaque identifier for user-owned application data."""
+    return hashlib.sha256(normalize_username(username).encode("utf-8")).hexdigest()
+
+
 def valid_signup_username(username: str) -> bool:
     """Accept email-shaped sign-in IDs and reject malformed addresses."""
     normalized = normalize_username(username)
