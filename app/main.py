@@ -135,6 +135,7 @@ async def protect_operator_routes(request: Request, call_next: Any) -> Any:
     )
     public_auth_paths = {
         "/api/v1/auth/login",
+        "/api/v1/auth/signup",
         "/api/v1/auth/logout",
         "/api/v1/auth/session",
     }
@@ -185,9 +186,11 @@ async def protect_operator_routes(request: Request, call_next: Any) -> Any:
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.gstatic.com; "
         "img-src 'self' data: https://fastapi.tiangolo.com; "
-        "media-src 'self' blob:; connect-src 'self' ws: wss:; "
+        "media-src 'self' blob:; "
+        "connect-src 'self' ws: wss: https://*.google-analytics.com "
+        "https://*.analytics.google.com https://firebaseinstallations.googleapis.com; "
         "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     )
     return response
@@ -312,11 +315,29 @@ def health() -> dict[str, str]:
 def public_config() -> dict[str, Any]:
     """Expose non-secret settings that help an operator interpret the dashboard."""
     settings = get_settings()
+    firebase_analytics_config = None
+    if all(
+        (
+            settings.firebase_web_api_key,
+            settings.firebase_auth_domain,
+            settings.firebase_project_id,
+            settings.firebase_app_id,
+            settings.firebase_measurement_id,
+        )
+    ):
+        firebase_analytics_config = {
+            "apiKey": settings.firebase_web_api_key,
+            "authDomain": settings.firebase_auth_domain,
+            "projectId": settings.firebase_project_id,
+            "appId": settings.firebase_app_id,
+            "measurementId": settings.firebase_measurement_id,
+        }
     return {
         "speed_limit_kmh": settings.speed_limit_kmh,
         "camera_location": settings.camera_location,
         "sms_simulation": settings.sms_simulation,
         "firebase_enabled": settings.firebase_enabled,
+        "firebase_analytics_config": firebase_analytics_config,
         "chat_enabled": bool(settings.gemini_api_key),
     }
 

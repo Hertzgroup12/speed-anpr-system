@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     firebase_enabled: bool = False
     firebase_project_id: str | None = None
     firebase_credentials: str | None = None
+    firebase_web_api_key: str | None = None
+    firebase_auth_domain: str | None = None
+    firebase_app_id: str | None = None
+    firebase_measurement_id: str | None = None
     firebase_collection: str = "speed_events"
     offense_collection: str = "speed_offenses"
     app_username: str | None = None

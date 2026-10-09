@@ -52,6 +52,9 @@ def test_homepage_serves_the_browser_app() -> None:
     assert 'id="signup-form"' in response.text
     assert 'fetch("/api/v1/auth/signup"' in response.text
     assert 'id="logout-button"' in response.text
+    assert 'id="inspect-video-location"' in response.text
+    assert 'fetch("/api/v1/location/video"' in response.text
+    assert "navigator.geolocation.getCurrentPosition" in response.text
     assert 'id="chat-form"' in response.text
     assert 'fetch("/api/v1/analyze"' in response.text
     assert "getUserMedia" in response.text
@@ -82,6 +85,24 @@ def test_login_rejects_invalid_credentials() -> None:
 
     assert response.status_code == 401
     assert "jnrd_session" not in unauthenticated_client.cookies
+
+
+def test_signup_is_public_but_still_checks_registration_configuration() -> None:
+    unauthenticated_client = TestClient(app)
+
+    response = unauthenticated_client.post(
+        "/api/v1/auth/signup",
+        json={
+            "username": "new-operator@example.com",
+            "password": "a-long-test-password",
+            "invite_code": "test-invitation-code-that-is-long",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "New account registration is unavailable because Firebase is disabled"
+    )
 
 
 def test_login_rate_limits_repeated_invalid_attempts(
@@ -213,6 +234,7 @@ def test_live_websocket_processes_browser_camera_frames(
         main,
         "get_settings",
         lambda: Settings(
+            _env_file=None,
             app_username="test-operator",
             app_password="test-password-123",
             app_secret_key="test-session-secret-that-is-long-enough",
@@ -261,6 +283,152 @@ def test_public_config_does_not_expose_sms_credentials() -> None:
     assert response.json()["speed_limit_kmh"] > 0
     assert response.json()["firebase_enabled"] is False
     assert "africastalking_api_key" not in response.json()
+
+
+def test_public_config_omits_incomplete_firebase_analytics_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: Settings(
+            _env_file=None,
+            app_username="test-operator",
+            app_password="test-password-123",
+            app_secret_key="test-session-secret-that-is-long-enough",
+            firebase_web_api_key="public-test-key",
+        ),
+    )
+
+    response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    assert response.json()["firebase_analytics_config"] is None
+
+
+def test_public_config_includes_complete_firebase_analytics_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: Settings(
+            app_username="test-operator",
+            app_password="test-password-123",
+            app_secret_key="test-session-secret-that-is-long-enough",
+            firebase_project_id="test-project",
+            firebase_web_api_key="public-test-key",
+            firebase_auth_domain="test-project.firebaseapp.com",
+            firebase_app_id="1:123:web:abcdef",
+            firebase_measurement_id="G-TEST123456",
+        ),
+    )
+
+    response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    assert response.json()["firebase_analytics_config"] == {
+        "apiKey": "public-test-key",
+        "authDomain": "test-project.firebaseapp.com",
+        "projectId": "test-project",
+        "appId": "1:123:web:abcdef",
+        "measurementId": "G-TEST123456",
+    }
+
+
+def test_video_location_api_returns_embedded_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+
+    monkeypatch.setattr(
+        main,
+        "extract_video_location",
+        lambda _path: {"latitude": 37.421998, "longitude": -122.084},
+    )
+
+    response = client.post(
+        "/api/v1/location/video",
+        files={"video": ("traffic.mp4", b"video-data", "video/mp4")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": True,
+        "location": {"latitude": 37.421998, "longitude": -122.084},
+    }
+
+
+def test_video_location_api_reports_missing_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+
+    monkeypatch.setattr(main, "extract_video_location", lambda _path: None)
+
+    response = client.post(
+        "/api/v1/location/video",
+        files={"video": ("traffic.mp4", b"video-data", "video/mp4")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "location": None}
+
+
+def test_analyze_uses_embedded_video_coordinates_for_recorded_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main
+
+    monkeypatch.setattr(
+        main,
+        "extract_video_location",
+        lambda _path: {"latitude": 37.421998, "longitude": -122.084},
+    )
+    monkeypatch.setattr(
+        main,
+        "analyze_video",
+        lambda *_args: {
+            "fps": 10.0,
+            "width": 64,
+            "height": 64,
+            "frames_processed": 10,
+            "duration_seconds": 1.0,
+            "events": [],
+        },
+    )
+    recorded = {}
+
+    def record_events(_events, _source, location, _detected_at, _settings):
+        recorded["location"] = location
+        return 0, 0
+
+    monkeypatch.setattr(main, "_record_events", record_events)
+
+    response = client.post(
+        "/api/v1/analyze",
+        data={
+            "distance_m": "10",
+            "line_a_ratio": "0.35",
+            "line_b_ratio": "0.65",
+            "location": "Roadside camera",
+        },
+        files={"video": ("traffic.mp4", b"video-data", "video/mp4")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["video_location"] == {
+        "latitude": 37.421998,
+        "longitude": -122.084,
+    }
+    assert response.json()["location"] == (
+        "Roadside camera · GPS 37.421998, -122.084000"
+    )
+    assert recorded["location"] == response.json()["location"]
 
 
 def test_analyze_rejects_equal_measurement_lines() -> None:

@@ -74,6 +74,8 @@
 
     .file-field { margin-bottom: 18px; }
     .file-help { margin: -10px 0 20px; color: #52667a; font-size: .88rem; }
+    .location-result { margin: 12px 0; }
+    .location-result a { color: #1769aa; }
 
     button {
       min-height: 46px;
@@ -254,6 +256,8 @@
           >
         </label>
         <p class="file-help">Supported formats: MP4, AVI, MOV, MKV, and WEBM.</p>
+        <button id="inspect-video-location" type="button">Read embedded video location</button>
+        <p id="video-location-status" class="status location-result" role="status" aria-live="polite" hidden></p>
 
         <div class="fields">
           <label for="distance">Distance between lines (meters)
@@ -281,6 +285,8 @@
         Allow camera access in your browser. The browser sends sampled frames to this server;
         live analysis and speed measurement use the same distance and line settings above.
         Keep the camera fixed and validate its calibration before interpreting speed readings.
+        Device coordinates are shared with the server and included with live detections;
+        they are stored with event records when Firebase is enabled.
       </p>
       <div class="camera-actions">
         <label for="camera-device">Camera device
@@ -288,9 +294,11 @@
             <option value="">Default camera</option>
           </select>
         </label>
+        <button id="use-device-location" type="button">Use device location</button>
         <button id="start-camera" type="button">Start live camera</button>
         <button id="stop-camera" class="stop" type="button" disabled>Stop camera</button>
       </div>
+      <p id="device-location-status" class="status location-result" role="status" aria-live="polite" hidden></p>
       <div class="live-preview">
         <video id="live-video" autoplay playsinline muted aria-label="Live camera preview"></video>
         <canvas id="line-overlay" aria-hidden="true"></canvas>
@@ -388,6 +396,10 @@
     const lineOverlay = document.querySelector("#line-overlay");
     const startCameraButton = document.querySelector("#start-camera");
     const stopCameraButton = document.querySelector("#stop-camera");
+    const useDeviceLocationButton = document.querySelector("#use-device-location");
+    const deviceLocationStatus = document.querySelector("#device-location-status");
+    const inspectVideoLocationButton = document.querySelector("#inspect-video-location");
+    const videoLocationStatus = document.querySelector("#video-location-status");
     const loginPanel = document.querySelector("#login-panel");
     const loginForm = document.querySelector("#login-form");
     const loginButton = document.querySelector("#login-button");
@@ -414,6 +426,121 @@
     let cameraSocket = null;
     let cameraRunning = false;
     let resolveCameraFrame = null;
+    let currentDeviceLocation = null;
+    let selectedVideoLocation = null;
+    let firebaseAnalyticsInitialization = null;
+
+    function formatCoordinates(location) {
+      return `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`;
+    }
+
+    function addMapLink(container, location) {
+      const link = document.createElement("a");
+      const { latitude, longitude } = location;
+      link.href =
+        `https://www.openstreetmap.org/?mlat=${encodeURIComponent(latitude)}` +
+        `&mlon=${encodeURIComponent(longitude)}#map=16/${encodeURIComponent(latitude)}` +
+        `/${encodeURIComponent(longitude)}`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Open map";
+      container.append(" ", link);
+    }
+
+    function formatLocationWithCoordinates(label, location) {
+      const suffix = `GPS ${formatCoordinates(location)}`;
+      const prefix = label.trim().slice(0, Math.max(0, 150 - suffix.length - 3)).trimEnd();
+      return prefix ? `${prefix} · ${suffix}` : suffix;
+    }
+
+    function showDeviceLocation(position) {
+      currentDeviceLocation = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      };
+      deviceLocationStatus.replaceChildren(
+        `Device location: ${formatCoordinates(currentDeviceLocation)} ` +
+        `(accuracy ±${Math.round(currentDeviceLocation.accuracy)} m).`,
+      );
+      addMapLink(deviceLocationStatus, currentDeviceLocation);
+      deviceLocationStatus.className = "status success location-result";
+      deviceLocationStatus.hidden = false;
+    }
+
+    function requestDeviceLocation() {
+      currentDeviceLocation = null;
+      if (!navigator.geolocation) {
+        deviceLocationStatus.textContent = "This browser does not support device location.";
+        deviceLocationStatus.className = "status error location-result";
+        deviceLocationStatus.hidden = false;
+        return;
+      }
+      useDeviceLocationButton.disabled = true;
+      deviceLocationStatus.textContent = "Waiting for location permission…";
+      deviceLocationStatus.className = "status location-result";
+      deviceLocationStatus.hidden = false;
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          showDeviceLocation(position);
+          useDeviceLocationButton.disabled = false;
+        },
+        (error) => {
+          deviceLocationStatus.textContent =
+            error.code === error.PERMISSION_DENIED
+              ? "Location permission was denied. You can enter a camera location manually."
+              : "Could not determine location. Check device location services and try again.";
+          deviceLocationStatus.className = "status error location-result";
+          useDeviceLocationButton.disabled = false;
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+      );
+    }
+
+    async function inspectVideoLocation() {
+      const video = document.querySelector("#video").files[0];
+      if (!video) {
+        videoLocationStatus.textContent = "Choose a video file first.";
+        videoLocationStatus.className = "status error location-result";
+        videoLocationStatus.hidden = false;
+        return;
+      }
+      inspectVideoLocationButton.disabled = true;
+      videoLocationStatus.textContent = "Checking the video for embedded GPS coordinates…";
+      videoLocationStatus.className = "status location-result";
+      videoLocationStatus.hidden = false;
+      try {
+        const upload = new FormData();
+        upload.append("video", video);
+        const response = await fetch("/api/v1/location/video", {
+          method: "POST",
+          body: upload,
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Could not inspect the video.");
+        selectedVideoLocation = result.location;
+        if (!result.available || !result.location) {
+          videoLocationStatus.textContent =
+            "No embedded GPS coordinates found. The video may not contain location metadata.";
+          videoLocationStatus.className = "status location-result";
+          return;
+        }
+        const location = result.location;
+        const altitude = Number.isFinite(location.altitude_m)
+          ? `, altitude ${location.altitude_m.toFixed(1)} m`
+          : "";
+        videoLocationStatus.replaceChildren(
+          `Embedded video GPS: ${formatCoordinates(location)}${altitude}.`,
+        );
+        addMapLink(videoLocationStatus, location);
+        videoLocationStatus.className = "status success location-result";
+      } catch (error) {
+        videoLocationStatus.textContent = `Could not inspect video location: ${error.message}`;
+        videoLocationStatus.className = "status error location-result";
+      } finally {
+        inspectVideoLocationButton.disabled = false;
+      }
+    }
 
     function showStatus(message, kind) {
       statusMessage.textContent = message;
@@ -462,9 +589,36 @@
       loadSystemSettings().then((settings) => {
         chatDisabled.hidden = settings.chat_enabled;
         chatForm.hidden = !settings.chat_enabled;
+        if (settings.firebase_analytics_config) {
+          initializeFirebaseAnalytics(settings.firebase_analytics_config);
+        }
       }).catch((error) => {
         systemSettings.textContent = `Could not load system settings: ${error.message}`;
       });
+    }
+
+    function initializeFirebaseAnalytics(firebaseConfig) {
+      if (firebaseAnalyticsInitialization) return firebaseAnalyticsInitialization;
+      firebaseAnalyticsInitialization = (async () => {
+        const [{ getApps, initializeApp }, { getAnalytics, isSupported }] =
+          await Promise.all([
+            import("https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js"),
+            import("https://www.gstatic.com/firebasejs/13.0.0/firebase-analytics.js"),
+          ]);
+        if (!(await isSupported())) {
+          console.info("Firebase Analytics is not supported in this browser.");
+          return;
+        }
+        const appName = "jnrd-pro-analytics";
+        const firebaseApp =
+          getApps().find((app) => app.name === appName) ||
+          initializeApp(firebaseConfig, appName);
+        getAnalytics(firebaseApp);
+      })().catch((error) => {
+        firebaseAnalyticsInitialization = null;
+        console.error("Could not initialize Firebase Analytics.", error);
+      });
+      return firebaseAnalyticsInitialization;
     }
 
     async function initializeLogin() {
@@ -675,7 +829,12 @@
               distance_m: Number(form.elements.distance_m.value),
               line_a_ratio: Number(form.elements.line_a_ratio.value),
               line_b_ratio: Number(form.elements.line_b_ratio.value),
-              location: form.elements.location.value.trim(),
+              location: currentDeviceLocation
+                ? formatLocationWithCoordinates(
+                  form.elements.location.value,
+                  currentDeviceLocation,
+                )
+                : form.elements.location.value.trim(),
             }));
           }, { once: true });
           cameraSocket.addEventListener("message", (event) => {
@@ -914,6 +1073,15 @@
           throw new Error(detail);
         }
 
+        if (result.video_location) {
+          selectedVideoLocation = result.video_location;
+          videoLocationStatus.replaceChildren(
+            `Embedded video GPS: ${formatCoordinates(result.video_location)}.`,
+          );
+          addMapLink(videoLocationStatus, result.video_location);
+          videoLocationStatus.className = "status success location-result";
+          videoLocationStatus.hidden = false;
+        }
         showEvents(result.events);
         summary.textContent =
           `${result.filename}: ${result.frames_processed} frames at ${result.fps} FPS, ` +
@@ -936,6 +1104,13 @@
 
     startCameraButton.addEventListener("click", startLiveCamera);
     stopCameraButton.addEventListener("click", () => stopLiveCamera());
+    useDeviceLocationButton.addEventListener("click", requestDeviceLocation);
+    inspectVideoLocationButton.addEventListener("click", inspectVideoLocation);
+    document.querySelector("#video").addEventListener("change", () => {
+      selectedVideoLocation = null;
+      videoLocationStatus.hidden = true;
+      videoLocationStatus.replaceChildren();
+    });
 
     loginForm.addEventListener("submit", async (event) => {
       event.preventDefault();

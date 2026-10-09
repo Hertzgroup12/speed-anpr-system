@@ -15,6 +15,9 @@ Copy-Item .env.example .env
 uvicorn app.main:app --reload
 ```
 
+## Sign up invitation code
+1002d28df43434794126fc492482d154d6e7c884650b68d091704b74c93aff48
+
 Open `http://127.0.0.1:8000/` for the dashboard, or `http://127.0.0.1:8000/docs` for the API. The dashboard supports both uploaded video and live browser-camera monitoring. On the first analysis the app downloads/loads the YOLO model and EasyOCR model, which can take a few minutes. CPU inference works; a compatible CUDA installation can accelerate OCR.
 
 Upload MP4, AVI, MOV, MKV, or WEBM video through the dashboard, or select **Start live camera** and grant browser camera permission. Live mode sends sampled JPEG frames from the browser to FastAPI over a WebSocket and waits for each frame to be processed before sending another; it does not expose the server computer's camera to a remote browser. Enter the real distance between the two virtual lines and a camera location. The default speed limit is 50 km/h. You can change settings in `.env` and restart the server.
@@ -46,6 +49,10 @@ Copy `.env.example` to `.env`:
 | `FIREBASE_ENABLED` | `false` | Store events and cases in Firestore |
 | `FIREBASE_PROJECT_ID` | unset | Firebase project ID |
 | `FIREBASE_CREDENTIALS` | unset | Service-account file path; otherwise Application Default Credentials |
+| `FIREBASE_WEB_API_KEY` | unset | Firebase web app API key for dashboard Analytics |
+| `FIREBASE_AUTH_DOMAIN` | unset | Firebase web app auth domain |
+| `FIREBASE_APP_ID` | unset | Firebase web app ID |
+| `FIREBASE_MEASUREMENT_ID` | unset | Google Analytics measurement ID (`G-...`) |
 | `FIREBASE_COLLECTION` | `speed_events` | Firestore collection for measurements |
 | `OFFENSE_COLLECTION` | `speed_offenses` | Firestore collection for review cases |
 | `SMS_SIMULATION` | `true` | Record a simulated notice without sending a text |
@@ -79,11 +86,17 @@ To enable the AI assistant, create a Gemini API key in [Google AI Studio](https:
 
 The configured operator account is shared; invite-created accounts are individual logins but currently receive the same operator permissions. Use a unique strong password, keep the app private where possible, and rotate credentials if they may have been exposed.
 
+The **Use device location** button requests browser geolocation only after the operator clicks it; browsers require HTTPS or localhost and location permission. Live-event locations include the coordinates when permission is granted, otherwise the manually configured camera location is used. Coordinates are sent to the server and included with live detections (and stored with event records when Firebase is enabled).
+
+**Read embedded video location** checks an uploaded video for ISO 6709 GPS coordinates; the same metadata is also checked during analysis and included in the recorded location when present. Videos without embedded GPS continue to use the configured location. The authenticated `POST /api/v1/location/video` endpoint accepts multipart form data with a `video` file and returns `{"available": true, "location": {"latitude": ..., "longitude": ..., "altitude_m": ...}}` when coordinates exist, or `{"available": false, "location": null}` otherwise. Coordinates are processed by this app and are not reverse-geocoded; opening the map link sends them to OpenStreetMap.
+
 The sign-in page offers **Create account** when `FIREBASE_ENABLED=true` and a 20-character-or-longer `ADMIN_INVITE_CODE` is configured. New accounts use an email address, a password of at least 12 characters, and the invitation code; account records are stored in Firestore. The configured operator account remains available for administration.
 
 ### Firebase
 
 Enable Firestore and set `FIREBASE_ENABLED=true`, `FIREBASE_PROJECT_ID`, and either `FIREBASE_CREDENTIALS` or Application Default Credentials. The web dashboard reads cases from Firestore when enabled. When it is disabled, cases are held in memory and disappear when the server restarts.
+
+To enable Firebase Analytics in the dashboard, register a **Web app** in Firebase, enable Google Analytics for the project, and copy its web configuration into `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_APP_ID`, and `FIREBASE_MEASUREMENT_ID` in the server environment. The existing `FIREBASE_PROJECT_ID` is reused. Analytics initializes automatically after a user signs in and the browser supports it. These web configuration values are public client identifiers, not service-account secrets; continue to keep `FIREBASE_CREDENTIALS` private. The browser loads the Firebase 13.0.0 modular SDK from Google's `gstatic` CDN.
 
 Vehicle and plate images are stored locally in `CAPTURE_DIRECTORY`, not Firebase Storage. Back up and protect that folder separately if image retention is required.
 
