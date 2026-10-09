@@ -3,7 +3,6 @@
 import json
 import threading
 import uuid
-from datetime import datetime, timezone
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -11,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from app.config import Settings
 from app.firebase_store import _firestore_client
+from app.time_utils import gmt_now_iso
 
 CaseDecision = Literal["reviewed", "dismissed"]
 _CASES: dict[str, dict[str, Any]] = {}
@@ -46,7 +46,7 @@ def create_offenses(
             "video_name": video_name,
             "review_status": "pending_review",
             "notification_status": "not_sent",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": gmt_now_iso(),
         }
         with _CASES_LOCK:
             _CASES[case["case_id"]] = case
@@ -99,14 +99,14 @@ def update_case_decision(
         reference.update(
             {
                 "review_status": decision,
-                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                "reviewed_at": gmt_now_iso(),
             }
         )
         case = snapshot.to_dict()
         case.update(
             {
                 "review_status": decision,
-                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                "reviewed_at": gmt_now_iso(),
             }
         )
         return case
@@ -116,7 +116,7 @@ def update_case_decision(
         if case is None:
             return None
         case["review_status"] = decision
-        case["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+        case["reviewed_at"] = gmt_now_iso()
         return case.copy()
 
 
@@ -154,7 +154,7 @@ def notify_driver(case_id: str, settings: Settings) -> dict[str, Any]:
 
     update = {
         "notification_status": status,
-        "notification_at": datetime.now(timezone.utc).isoformat(),
+        "notification_at": gmt_now_iso(),
     }
     if settings.firebase_enabled:
         (

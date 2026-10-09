@@ -1,11 +1,10 @@
 """Tests for speed-case review and simulation-only driver notifications."""
 
-from datetime import datetime, timezone
-
 import pytest
 
 from app.config import Settings
 from app.offenses import create_offenses, notify_driver, update_case_decision
+from app.time_utils import gmt_now_iso
 from fastapi.testclient import TestClient
 
 
@@ -28,7 +27,7 @@ def test_create_offenses_flags_only_speeds_above_limit() -> None:
         [make_event(50), make_event(51)],
         "test.mp4",
         "Test road",
-        datetime.now(timezone.utc).isoformat(),
+        gmt_now_iso(),
         settings,
     )
 
@@ -48,7 +47,7 @@ def test_simulated_notice_requires_review_and_is_not_repeatable() -> None:
         [make_event(61)],
         "test.mp4",
         "Test road",
-        datetime.now(timezone.utc).isoformat(),
+        gmt_now_iso(),
         settings,
     )
     case_id = cases[0]["case_id"]
@@ -82,7 +81,7 @@ def test_simulated_notice_requires_a_driver_lookup(
         [make_event(61)],
         "test.mp4",
         "Test road",
-        datetime.now(timezone.utc).isoformat(),
+        gmt_now_iso(),
         settings,
     )
     update_case_decision(cases[0]["case_id"], "reviewed", settings)
@@ -108,7 +107,7 @@ def test_reviewed_case_can_use_dashboard_simulation(
         [make_event(62)],
         "dashboard-test.mp4",
         "Test road",
-        datetime.now(timezone.utc).isoformat(),
+        gmt_now_iso(),
         settings,
     )
     monkeypatch.setattr(main, "get_settings", lambda: settings)

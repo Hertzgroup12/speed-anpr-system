@@ -6,7 +6,6 @@ import tempfile
 import threading
 import time
 from collections import deque
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -51,7 +50,7 @@ from app.auth import (
 )
 from app.chatbot import MAX_MESSAGE_LENGTH, ask_gemini
 from app.config import get_settings
-from app.firebase_store import persist_events
+from app.firebase_store import persist_events, record_auth_event
 from app.location import extract_video_location
 from app.offenses import (
     create_offenses,
@@ -59,6 +58,7 @@ from app.offenses import (
     notify_driver,
     update_case_decision,
 )
+from app.time_utils import gmt_now_iso
 
 ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -383,12 +383,14 @@ def login(request: Request, credentials: LoginRequest) -> JSONResponse:
                 status_code=429,
                 detail="Too many sign-in attempts. Wait 15 minutes before trying again.",
             )
+    auth_method = "configured_operator"
     authenticated = credentials_match(
         credentials.username,
         credentials.password,
         settings,
     )
     if not authenticated:
+        auth_method = "registered_account"
         try:
             authenticated = authenticate_registered_user(
                 credentials.username,
@@ -404,6 +406,19 @@ def login(request: Request, credentials: LoginRequest) -> JSONResponse:
         with _LOGIN_ATTEMPTS_LOCK:
             _LOGIN_ATTEMPTS[client_host].append(now)
         raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    try:
+        record_auth_event(
+            credentials.username,
+            "login",
+            auth_method,
+            settings,
+        )
+    except GoogleAPICallError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication audit service is temporarily unavailable",
+        ) from error
 
     with _LOGIN_ATTEMPTS_LOCK:
         _LOGIN_ATTEMPTS.pop(client_host, None)
@@ -690,7 +705,7 @@ async def live_camera(websocket: WebSocket) -> None:
                 continue
 
             if events:
-                detected_at = datetime.now(timezone.utc).isoformat()
+                detected_at = gmt_now_iso()
                 offenses_created, events_persisted = await run_in_threadpool(
                     _record_events,
                     events,
@@ -778,7 +793,7 @@ async def analyze(
                 status_code=422,
                 detail="Camera location must not be empty",
             )
-        detected_at = datetime.now(timezone.utc).isoformat()
+        detected_at = gmt_now_iso()
         try:
             analysis = await run_in_threadpool(
                 analyze_video,

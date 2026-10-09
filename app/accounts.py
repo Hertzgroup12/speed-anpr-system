@@ -3,12 +3,12 @@
 import hashlib
 import re
 import secrets
-from datetime import datetime, timezone
 
 from google.api_core.exceptions import AlreadyExists
 
 from app.config import Settings
-from app.firebase_store import _firestore_client
+from app.firebase_store import _auth_event_data, _firestore_client
+from app.time_utils import gmt_now_iso
 
 PASSWORD_ITERATIONS = 600_000
 EMAIL_PATTERN = re.compile(r"^[^@\s]{1,64}@[^@\s.]+(?:\.[^@\s.]+)+$")
@@ -64,16 +64,30 @@ def register_user(username: str, password: str, settings: Settings) -> None:
         PASSWORD_ITERATIONS,
     )
     reference = _user_reference(username, settings)
+    client = _firestore_client(
+        settings.firebase_project_id,
+        settings.firebase_credentials,
+    )
     try:
-        reference.create(
+        batch = client.batch()
+        batch.create(
+            reference,
             {
                 "username": normalize_username(username),
                 "password_salt": salt.hex(),
                 "password_hash": password_hash.hex(),
                 "password_iterations": PASSWORD_ITERATIONS,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
+                "created_at": gmt_now_iso(),
+            },
         )
+        audit_reference = client.collection(
+            settings.auth_audit_collection
+        ).document()
+        batch.set(
+            audit_reference,
+            _auth_event_data(username, "signup", "invite_code"),
+        )
+        batch.commit()
     except AlreadyExists as error:
         raise FileExistsError("An account with this email already exists") from error
 

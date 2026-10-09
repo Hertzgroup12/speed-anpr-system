@@ -49,6 +49,7 @@ Copy `.env.example` to `.env`:
 | `FIREBASE_ENABLED` | `false` | Store events and cases in Firestore |
 | `FIREBASE_PROJECT_ID` | unset | Firebase project ID |
 | `FIREBASE_CREDENTIALS` | unset | Service-account file path; otherwise Application Default Credentials |
+| `AUTH_AUDIT_COLLECTION` | `operator_auth_logs` | Firestore collection for successful account creation and sign-in audit events |
 | `FIREBASE_WEB_API_KEY` | unset | Firebase web app API key for dashboard Analytics |
 | `FIREBASE_AUTH_DOMAIN` | unset | Firebase web app auth domain |
 | `FIREBASE_APP_ID` | unset | Firebase web app ID |
@@ -91,6 +92,8 @@ The **Use device location** button requests browser geolocation only after the o
 **Read embedded video location** checks an uploaded video for ISO 6709 GPS coordinates; the same metadata is also checked during analysis and included in the recorded location when present. Videos without embedded GPS continue to use the configured location. The authenticated `POST /api/v1/location/video` endpoint accepts multipart form data with a `video` file and returns `{"available": true, "location": {"latitude": ..., "longitude": ..., "altitude_m": ...}}` when coordinates exist, or `{"available": false, "location": null}` otherwise. Coordinates are processed by this app and are not reverse-geocoded; opening the map link sends them to OpenStreetMap.
 
 The sign-in page offers **Create account** when `FIREBASE_ENABLED=true` and a 20-character-or-longer `ADMIN_INVITE_CODE` is configured. New accounts use an email address, a password of at least 12 characters, and the invitation code; account records are stored in Firestore. The configured operator account remains available for administration.
+
+Successful account creation and sign-in events are recorded in Firestore's `operator_auth_logs` collection (configurable with `AUTH_AUDIT_COLLECTION`) when Firebase is enabled. Each entry contains the normalized username, action, authentication method, and a human-readable GMT timestamp; no password, session token, or IP address is recorded. Account creation and its audit event are committed together. ISO timestamps elsewhere in stored records retain their `+00:00` offset, which is GMT.
 
 ### Firebase
 

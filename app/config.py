@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     firebase_measurement_id: str | None = None
     firebase_collection: str = "speed_events"
     offense_collection: str = "speed_offenses"
+    auth_audit_collection: str = "operator_auth_logs"
     app_username: str | None = None
     app_password: str | None = None
     app_secret_key: str | None = None
