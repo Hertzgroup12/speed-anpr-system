@@ -1,4 +1,4 @@
-"""Timestamp helpers using GMT (the zero-offset equivalent of UTC)."""
+"""Timestamp helpers for GMT, the zero-offset time standard."""
 
 from datetime import datetime, timedelta, timezone
 
