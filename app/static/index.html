@@ -64,6 +64,24 @@
     :root[data-theme="dark"] .chat-message.user { background: #1b3b5b; }
     :root[data-theme="dark"] .chat-disabled { color: #fecaca; }
     :root[data-theme="dark"] footer { color: #b6c3d1; }
+    :root[data-theme="dark"] .app-bar-actions a { background: #1769aa; }
+    :root[data-theme="dark"] .app-bar-actions a:hover { background: #0f5794; }
+
+    :root[data-page="cases"] #app-header h1,
+    :root[data-page="cases"] #app-header .app-bar > div > p,
+    :root[data-page="cases"] #open-cases-window,
+    :root[data-page="cases"] #personal-settings-panel,
+    :root[data-page="cases"] #operator-app > section:not(#offenses-panel),
+    :root[data-page="cases"] #app-footer {
+      display: none;
+    }
+
+    :root[data-page="cases"] #offenses-heading-row {
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    :root[data-page="cases"] #offenses-heading-row h2 { margin: 0; }
 
     header {
       padding: 28px max(24px, calc((100% - 1080px) / 2));
@@ -198,7 +216,56 @@
     .app-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     .app-bar button { min-height: 38px; padding: 8px 14px; }
     .app-bar-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+    .app-bar button.theme-toggle {
+      display: inline-grid;
+      width: 40px;
+      min-height: 38px;
+      place-items: center;
+      padding: 0;
+      border: 1px solid #486078;
+      color: #d9e2ec;
+      background: transparent;
+    }
+    .app-bar button.theme-toggle:hover { background: #29445e; }
+    .theme-toggle svg { display: block; width: 20px; height: 20px; }
+    .theme-toggle .moon-icon { display: none; }
+    :root[data-theme="dark"] .theme-toggle .sun-icon { display: none; }
+    :root[data-theme="dark"] .theme-toggle .moon-icon { display: block; }
+    .app-bar-actions a {
+      display: inline-flex;
+      min-height: 38px;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 14px;
+      border-radius: 7px;
+      color: white;
+      background: #1769aa;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .app-bar-actions a:hover { background: #0f5794; }
+    .app-bar-actions .logout-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .app-bar-actions .control-icon { width: 17px; height: 17px; flex: 0 0 auto; }
     .account-name { margin: 8px 0 0; color: #d9e2ec; overflow-wrap: anywhere; }
+    #offenses-heading-row { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+    .button-link {
+      display: inline-flex;
+      min-height: 38px;
+      flex: 0 0 auto;
+      align-items: center;
+      padding: 8px 14px;
+      border-radius: 7px;
+      color: white;
+      background: #1769aa;
+      font-size: .9rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .button-link:hover { background: #0f5794; }
     #logout-status { margin: 10px 0 0; }
     .chat-log {
       display: grid;
@@ -274,12 +341,36 @@
   <header id="app-header" hidden>
     <div class="app-bar">
       <div>
-    <h1>JNRD PRO</h1>
-    <p>Upload a traffic video to detect vehicles, estimate their speed, and read visible number plates.</p>
+        <h1>JNRD PRO</h1>
+        <p>Upload a traffic video to detect vehicles, estimate their speed, and read visible number plates.</p>
       </div>
       <div class="app-bar-actions">
-        <button id="theme-toggle" type="button" aria-pressed="false">Dark mode: Off</button>
-        <button id="logout-button" type="button">Log out</button>
+        <a id="workspace-navigation" href="/cases" target="_blank" rel="noopener noreferrer">
+          <svg class="control-icon dashboard-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="8" height="8" rx="1.5"></rect>
+            <rect x="13" y="3" width="8" height="5" rx="1.5"></rect>
+            <rect x="13" y="10" width="8" height="11" rx="1.5"></rect>
+            <rect x="3" y="13" width="8" height="8" rx="1.5"></rect>
+          </svg>
+          <span id="workspace-navigation-label">Speed cases</span>
+        </a>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false">
+          <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path>
+          </svg>
+          <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.9 13.1A8.5 8.5 0 0 1 10.9 3.1 8.5 8.5 0 1 0 20.9 13.1Z"></path>
+          </svg>
+        </button>
+        <button id="logout-button" class="logout-button" type="button">
+          <svg class="control-icon logout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10 17l5-5-5-5"></path>
+            <path d="M15 12H3"></path>
+            <path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"></path>
+          </svg>
+          <span>Log out</span>
+        </button>
       </div>
     </div>
     <p id="account-name" class="account-name"></p>
@@ -287,7 +378,7 @@
   </header>
 
   <main id="operator-app" hidden>
-    <section class="panel" aria-labelledby="personal-settings-heading">
+    <section id="personal-settings-panel" class="panel" aria-labelledby="personal-settings-heading">
       <h2 id="personal-settings-heading">My workspace settings</h2>
       <p class="hint">These defaults and review threshold are private to your account.</p>
       <form id="personal-settings-form">
@@ -397,8 +488,11 @@
       </div>
     </section>
 
-    <section class="panel" aria-labelledby="offenses-heading">
-      <h2 id="offenses-heading">Speed cases — operator review</h2>
+    <section id="offenses-panel" class="panel" aria-labelledby="offenses-heading">
+      <div id="offenses-heading-row">
+        <h2 id="offenses-heading">Speed cases — operator review</h2>
+        <a id="open-cases-window" class="button-link" href="/cases" target="_blank" rel="noopener noreferrer">Open in new window ↗</a>
+      </div>
       <p class="hint">
         Speeds above the configured limit are estimates, not legal findings.
         Review each case before taking any follow-up action. Driver SMS is simulated by default.
@@ -450,6 +544,10 @@
   </footer>
 
   <script>
+    const casesPage = window.location.pathname === "/cases";
+    document.documentElement.dataset.page = casesPage ? "cases" : "dashboard";
+    if (casesPage) document.title = "Speed cases — JNRD PRO";
+
     const form = document.querySelector("#analyze-form");
     const button = document.querySelector("#submit-button");
     const statusMessage = document.querySelector("#status");
@@ -486,6 +584,8 @@
     const logoutStatus = document.querySelector("#logout-status");
     const themeToggle = document.querySelector("#theme-toggle");
     const accountName = document.querySelector("#account-name");
+    const workspaceNavigation = document.querySelector("#workspace-navigation");
+    const workspaceNavigationLabel = document.querySelector("#workspace-navigation-label");
     const personalSettingsForm = document.querySelector("#personal-settings-form");
     const personalSettingsStatus = document.querySelector("#personal-settings-status");
     const savePersonalSettingsButton = document.querySelector("#save-personal-settings");
@@ -505,10 +605,17 @@
     let dashboardConfig = null;
     let currentThemeKey = null;
 
+    if (casesPage) {
+      workspaceNavigation.href = "/";
+      workspaceNavigationLabel.textContent = "Dashboard";
+    }
+
     function setTheme(isDark) {
       document.documentElement.dataset.theme = isDark ? "dark" : "light";
       themeToggle.setAttribute("aria-pressed", String(isDark));
-      themeToggle.textContent = `Dark mode: ${isDark ? "On" : "Off"}`;
+      const label = `Switch to ${isDark ? "light" : "dark"} mode`;
+      themeToggle.setAttribute("aria-label", label);
+      themeToggle.title = label;
     }
 
     function loadTheme(username) {

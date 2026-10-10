@@ -52,7 +52,14 @@ def test_homepage_serves_the_browser_app() -> None:
     assert 'id="signup-form"' in response.text
     assert 'fetch("/api/v1/auth/signup"' in response.text
     assert 'id="logout-button"' in response.text
+    assert 'class="control-icon dashboard-icon"' in response.text
+    assert 'class="control-icon logout-icon"' in response.text
+    assert 'id="workspace-navigation-label">Speed cases</span>' in response.text
+    assert 'workspaceNavigationLabel.textContent = "Dashboard"' in response.text
     assert 'id="theme-toggle"' in response.text
+    assert 'class="sun-icon"' in response.text
+    assert 'class="moon-icon"' in response.text
+    assert 'aria-label="Switch to dark mode"' in response.text
     assert 'aria-pressed="false"' in response.text
     assert 'localStorage.setItem(currentThemeKey' in response.text
     assert 'id="inspect-video-location"' in response.text
@@ -61,6 +68,16 @@ def test_homepage_serves_the_browser_app() -> None:
     assert 'id="chat-form"' in response.text
     assert 'fetch("/api/v1/analyze"' in response.text
     assert "getUserMedia" in response.text
+
+
+def test_speed_cases_open_in_a_dedicated_page() -> None:
+    response = client.get("/cases")
+
+    assert response.status_code == 200
+    assert 'id="offenses-panel"' in response.text
+    assert 'href="/cases" target="_blank"' in response.text
+    assert 'window.location.pathname === "/cases"' in response.text
+    assert ':root[data-page="cases"] #operator-app > section:not(#offenses-panel)' in response.text
 
 
 def test_openapi_uses_the_product_name() -> None:

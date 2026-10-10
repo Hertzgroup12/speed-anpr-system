@@ -625,6 +625,12 @@ def web_app() -> FileResponse:
     return FileResponse(WEB_APP_FILE)
 
 
+@app.get("/cases", include_in_schema=False)
+def cases_app() -> FileResponse:
+    """Serve the dashboard client in its dedicated speed-case view."""
+    return FileResponse(WEB_APP_FILE)
+
+
 @app.get("/api/v1/captures/{capture_id}.jpg", include_in_schema=False)
 def get_capture(capture_id: str, request: Request) -> FileResponse:
     """Serve a locally retained image only to the account that owns its case."""
