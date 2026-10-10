@@ -48,6 +48,8 @@ def test_homepage_serves_the_browser_app() -> None:
     assert "<title>JNRD PRO</title>" in response.text
     assert "<h1>JNRD PRO</h1>" in response.text
     assert 'id="login-form"' in response.text
+    assert 'id="login-theme-toggle"' in response.text
+    assert 'class="auth-heading"' in response.text
     assert 'id="create-account-button"' in response.text
     assert 'id="signup-form"' in response.text
     assert 'fetch("/api/v1/auth/signup"' in response.text
@@ -62,6 +64,7 @@ def test_homepage_serves_the_browser_app() -> None:
     assert 'aria-label="Switch to dark mode"' in response.text
     assert 'aria-pressed="false"' in response.text
     assert 'localStorage.setItem(currentThemeKey' in response.text
+    assert 'const authThemeKey = "jnrd-theme:auth"' in response.text
     assert 'id="inspect-video-location"' in response.text
     assert 'fetch("/api/v1/location/video"' in response.text
     assert "navigator.geolocation.getCurrentPosition" in response.text
@@ -78,6 +81,59 @@ def test_speed_cases_open_in_a_dedicated_page() -> None:
     assert 'href="/cases" target="_blank"' in response.text
     assert 'window.location.pathname === "/cases"' in response.text
     assert ':root[data-page="cases"] #operator-app > section:not(#offenses-panel)' in response.text
+    assert 'id="case-report-form"' in response.text
+    assert 'value="weekly">Current calendar week' in response.text
+    assert 'value="monthly">Current calendar month' in response.text
+    assert 'value="yearly">Current calendar year' in response.text
+    assert '/api/v1/offenses/report.pdf?period=' in response.text
+
+
+def test_case_report_download_is_account_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import datetime
+
+    from app import main
+    from app.accounts import user_id_for_username
+    from app.time_utils import GMT
+
+    settings = main.get_settings()
+    requested_owner_ids: list[str] = []
+    detected_at = datetime.now(GMT).isoformat()
+    monkeypatch.setattr(main, "get_settings", lambda: settings)
+
+    def list_user_cases(_settings, owner_id):
+        requested_owner_ids.append(owner_id)
+        return [
+            {
+                "case_id": "case-for-report",
+                "plate_number": "ABC1234",
+                "speed_kmh": 61,
+                "speed_limit_kmh": 50,
+                "location": "Test road",
+                "detected_at": detected_at,
+                "review_status": "reviewed",
+                "notification_status": "not_sent",
+            }
+        ]
+
+    monkeypatch.setattr(main, "list_offenses", list_user_cases)
+
+    response = client.get("/api/v1/offenses/report.pdf?period=monthly")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert 'attachment; filename="speed-case-review-monthly-' in response.headers[
+        "content-disposition"
+    ]
+    assert response.content.startswith(b"%PDF-")
+    assert requested_owner_ids == [user_id_for_username(settings.app_username or "")]
+
+
+def test_case_report_rejects_unsupported_period() -> None:
+    response = client.get("/api/v1/offenses/report.pdf?period=daily")
+
+    assert response.status_code == 422
 
 
 def test_openapi_uses_the_product_name() -> None:

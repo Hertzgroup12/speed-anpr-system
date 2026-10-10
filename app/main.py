@@ -21,10 +21,11 @@ from fastapi import (
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
+    Query,
 )
 from google.api_core.exceptions import GoogleAPICallError
 from pydantic import BaseModel, Field, ValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from app.accounts import (
@@ -60,6 +61,11 @@ from app.offenses import (
     list_offenses,
     notify_driver,
     update_case_decision,
+)
+from app.reports import (
+    ReportPeriod,
+    build_case_report_pdf,
+    cases_in_calendar_period,
 )
 from app.time_utils import gmt_now_iso
 from app.user_settings import get_user_settings, save_user_settings
@@ -658,6 +664,30 @@ def offenses(request: Request) -> dict[str, Any]:
     return {
         "offenses": list_offenses(settings, user_id_for_username(username))
     }
+
+
+@app.get("/api/v1/offenses/report.pdf")
+def offense_report(
+    request: Request,
+    period: ReportPeriod = Query(default="weekly"),
+) -> Response:
+    """Download this user's weekly, monthly, or yearly detection-date report."""
+    settings = get_settings()
+    username = _authenticated_username(request, settings)
+    owner_id = user_id_for_username(username)
+    selected_cases, start, end = cases_in_calendar_period(
+        list_offenses(settings, owner_id),
+        period,
+    )
+    pdf = build_case_report_pdf(selected_cases, period, start, end)
+    filename = f"speed-case-review-{period}-{start.isoformat()}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @app.patch("/api/v1/offenses/{case_id}")
